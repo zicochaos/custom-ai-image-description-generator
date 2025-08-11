@@ -72,19 +72,30 @@ A powerful WordPress plugin that automatically generates accessible alt text for
 | **Debug Mode** | Enable detailed logging | Off | On/Off |
 
 #### Language Settings
-The plugin can generate alt text in any language. Common language codes:
+The plugin can generate alt text in any language. **Important**: The prompt can remain in English while the output is generated in your chosen language.
+
+**How it works:**
+- **Custom Prompt**: Can be in English (or any language you're comfortable with)
+- **Language Setting**: Controls the output language of the generated alt text
+- **Example**: Prompt in English → "Generate a brief alt text description for this image:" + Language: `pl` → Output in Polish
+
+**Common language codes:**
 - `en` - English (default)
 - `es` - Spanish
 - `fr` - French
 - `de` - German
 - `it` - Italian
 - `pt` - Portuguese
+- `pl` - Polish
 - `ja` - Japanese
 - `zh` - Chinese
 - `ar` - Arabic
 - `ru` - Russian
 - `hi` - Hindi
 - `ko` - Korean
+- `nl` - Dutch
+- `sv` - Swedish
+- `cs` - Czech
 
 #### Token Limits
 - **50-100 tokens**: Very brief descriptions (1-2 sentences)
@@ -106,23 +117,26 @@ The plugin can generate alt text in any language. Common language codes:
 
 ### Configuration Examples
 
-#### Example 1: E-commerce Site (English)
+#### Example 1: Polish E-commerce (English Prompt → Polish Output)
 - **Model**: `claude-3-5-sonnet-latest` (balanced quality/speed)
-- **Language**: `en`
+- **Custom Prompt**: "Generate SEO-friendly alt text focusing on product features, color, and style:" (in English)
+- **Language**: `pl` (outputs in Polish)
 - **Max Tokens**: `150`
-- **Custom Prompt**: "Generate SEO-friendly alt text focusing on product features, color, and style:"
+- **Result**: English instructions → Polish alt text
 
-#### Example 2: News Website (Spanish)
+#### Example 2: Spanish News Website
 - **Model**: `claude-3-5-haiku-latest` (fast for high volume)
-- **Language**: `es`
+- **Custom Prompt**: "Generate alt text describing people, actions, and news context:" (in English)
+- **Language**: `es` (outputs in Spanish)
 - **Max Tokens**: `200`
-- **Custom Prompt**: "Genera texto alternativo describiendo personas, acciones y contexto noticioso:"
+- **Result**: English instructions → Spanish alt text
 
-#### Example 3: Art Gallery (French)
+#### Example 3: Multilingual Art Gallery
 - **Model**: `claude-opus-4-1` (highest quality)
-- **Language**: `fr`
+- **Custom Prompt**: "Describe this artwork focusing on style, medium, and mood:" (in English)
+- **Language**: `fr` / `de` / `it` (change per image/gallery section)
 - **Max Tokens**: `300`
-- **Custom Prompt**: "Décrivez cette œuvre d'art en détaillant le style, le médium et l'ambiance:"
+- **Result**: Same English prompt → French/German/Italian output as needed
 
 ## 📖 Usage Guide
 
@@ -213,10 +227,13 @@ Access these at:
 
 1. **Use Clear Image Titles** - The plugin uses image titles to provide context
 2. **Choose the Right Model** - Use Sonnet for balance, Haiku for speed, Opus for quality
-3. **Customize Prompts** - Tailor the prompt to your specific needs
-4. **Set Appropriate Token Limits** - 150-200 tokens usually sufficient for alt text
-5. **Adjust Language Output** - Set language code (en, es, fr, etc.) for localized alt text
-6. **Process in Batches** - For large libraries, process 10-20 images at a time
+3. **Keep Prompts in English** - You can write prompts in English even when outputting to other languages
+4. **Set Your Output Language** - Use language code (pl, es, fr, etc.) to generate alt text in any language
+5. **Customize Prompts** - Tailor the prompt to your specific needs (SEO, accessibility, etc.)
+6. **Set Appropriate Token Limits** - 150-200 tokens usually sufficient for alt text
+7. **Process in Batches** - For large libraries, process 10-20 images at a time
+
+> **💡 Pro Tip:** You don't need to translate your prompts! Write them in English and set the Language field to your desired output language (e.g., `pl` for Polish). Claude will understand your English instructions and generate alt text in Polish.
 
 ### Accessibility Guidelines
 
