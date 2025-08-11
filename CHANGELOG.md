@@ -5,6 +5,24 @@ All notable changes to the Custom AI Image Description Generator plugin will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2025-01-11
+
+### Changed
+- 🚀 **Switched to model aliases** for automatic updates
+  - Now uses `claude-3-5-sonnet-latest` instead of specific versions
+  - Plugin automatically uses newest model versions without updates
+  - No more manual model ID updates needed
+
+### Updated
+- Default model changed from `claude-3-5-sonnet-20241022` to `claude-3-5-sonnet-latest`
+- All models now use aliases (`-latest`, `-4-0`, `-4-1` suffixes)
+- Documentation updated to reflect alias usage
+
+### Benefits
+- ✨ Future-proof: Automatically gets model improvements
+- 🔧 Zero maintenance: No plugin updates needed for new models
+- ⚡ Always current: Uses latest Claude capabilities
+
 ## [2.0.0] - 2025-01-11
 
 ### Added

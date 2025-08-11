@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: Custom AI Image Description Generator (Claude)
-Description: Automatically generates alt text for images using Anthropic's Claude API
-Version: 2.0
+Description: Automatically generates alt text for images using Anthropic's Claude API with auto-updating model aliases
+Version: 2.1
 Author: Your Name
 */
 
@@ -66,20 +66,22 @@ function custom_ai_image_description_claude_api_key_callback() {
 }
 
 function custom_ai_image_description_model_callback() {
-    $model = get_option('custom_ai_image_description_model', 'claude-3-5-sonnet-20241022');
+    $model = get_option('custom_ai_image_description_model', 'claude-3-5-sonnet-latest');
+    // Using aliases for automatic updates to latest model versions
     $models = array(
-        'claude-3-5-sonnet-20241022' => 'Claude 3.5 Sonnet (Recommended)',
-        'claude-3-5-haiku-20241022' => 'Claude 3.5 Haiku (Fast & Economical)',
-        'claude-3-7-sonnet-20250219' => 'Claude 3.7 Sonnet (Latest)',
-        'claude-opus-4-20250514' => 'Claude Opus 4',
-        'claude-opus-4-1-20250805' => 'Claude Opus 4.1 (Most Powerful)',
-        'claude-sonnet-4-20250514' => 'Claude Sonnet 4'
+        'claude-3-5-sonnet-latest' => 'Claude 3.5 Sonnet (Recommended - Auto-updates)',
+        'claude-3-5-haiku-latest' => 'Claude 3.5 Haiku (Fast & Economical - Auto-updates)',
+        'claude-3-7-sonnet-latest' => 'Claude 3.7 Sonnet (Latest - Auto-updates)',
+        'claude-sonnet-4-0' => 'Claude Sonnet 4 (Auto-updates)',
+        'claude-opus-4-0' => 'Claude Opus 4 (Auto-updates)',
+        'claude-opus-4-1' => 'Claude Opus 4.1 (Most Powerful - Auto-updates)'
     );
     echo '<select name="custom_ai_image_description_model">';
     foreach ($models as $model_id => $model_name) {
         echo '<option value="' . esc_attr($model_id) . '" ' . selected($model, $model_id, false) . '>' . esc_html($model_name) . '</option>';
     }
     echo '</select>';
+    echo '<p class="description">Using model aliases ensures you always get the latest version automatically.</p>';
 }
 
 function custom_ai_image_description_prompt_callback() {
@@ -106,7 +108,7 @@ function custom_ai_image_description_debug_mode_callback() {
 // Generate alt text using Claude API
 function custom_ai_image_description_generate($image_url, $image_title = '') {
     $api_key = get_option('custom_ai_image_description_claude_api_key');
-    $model = get_option('custom_ai_image_description_model', 'claude-3-5-sonnet-20241022');
+    $model = get_option('custom_ai_image_description_model', 'claude-3-5-sonnet-latest');
     $prompt = get_option('custom_ai_image_description_prompt', 'Generate a brief alt text description for this image:');
     $language = get_option('custom_ai_image_description_language', 'en');
     $max_tokens = intval(get_option('custom_ai_image_description_max_tokens', 200));

@@ -4,7 +4,7 @@ A powerful WordPress plugin that automatically generates accessible alt text for
 
 ![WordPress Version](https://img.shields.io/badge/WordPress-5.0%2B-blue)
 ![PHP Version](https://img.shields.io/badge/PHP-7.4%2B-purple)
-![Plugin Version](https://img.shields.io/badge/Version-2.0-green)
+![Plugin Version](https://img.shields.io/badge/Version-2.1-green)
 ![License](https://img.shields.io/badge/License-GPL%20v2-red)
 
 ## ✨ Features
@@ -65,24 +65,24 @@ A powerful WordPress plugin that automatically generates accessible alt text for
 | Setting | Description | Default |
 |---------|-------------|---------|
 | **API Key** | Your Anthropic API key | Required |
-| **Model** | Claude model to use | claude-3-5-sonnet-20241022 |
+| **Model** | Claude model to use (auto-updating alias) | claude-3-5-sonnet-latest |
 | **Custom Prompt** | Instructions for alt text generation | "Generate a brief alt text description for this image:" |
 | **Language** | Output language code | en |
 | **Max Tokens** | Maximum length of generated text | 200 |
 | **Debug Mode** | Enable detailed logging | Off |
 
-### Available Models
+### Available Models (Using Auto-updating Aliases)
 
-| Model ID | Description | Best For |
-|----------|-------------|----------|
-| `claude-3-5-sonnet-20241022` | Claude 3.5 Sonnet | **Recommended** - Best balance |
-| `claude-3-5-haiku-20241022` | Claude 3.5 Haiku | Fast & economical |
-| `claude-3-7-sonnet-20250219` | Claude 3.7 Sonnet | Latest 3.x series |
-| `claude-opus-4-20250514` | Claude Opus 4 | Very powerful |
-| `claude-opus-4-1-20250805` | Claude Opus 4.1 | Most powerful |
-| `claude-sonnet-4-20250514` | Claude Sonnet 4 | Balanced performance |
+| Model Alias | Description | Auto-updates to |
+|-------------|-------------|-----------------|
+| `claude-3-5-sonnet-latest` | Claude 3.5 Sonnet | **Recommended** - Latest 3.5 Sonnet version |
+| `claude-3-5-haiku-latest` | Claude 3.5 Haiku | Latest 3.5 Haiku (Fast & economical) |
+| `claude-3-7-sonnet-latest` | Claude 3.7 Sonnet | Latest 3.7 Sonnet version |
+| `claude-sonnet-4-0` | Claude Sonnet 4 | Latest Sonnet 4.x version |
+| `claude-opus-4-0` | Claude Opus 4 | Latest Opus 4.x version |
+| `claude-opus-4-1` | Claude Opus 4.1 | Latest Opus 4.1.x (Most powerful) |
 
-> **Tip:** Consider using model aliases (like `claude-3-5-sonnet-latest`) to automatically use the newest model versions without updating your settings.
+> **🎯 Benefit of Aliases:** The plugin now uses model aliases that automatically point to the newest model versions. When Anthropic releases updates, your plugin will use them without any configuration changes!
 
 ## 📖 Usage Guide
 
