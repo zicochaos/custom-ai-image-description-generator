@@ -62,14 +62,34 @@ A powerful WordPress plugin that automatically generates accessible alt text for
 
 ### Plugin Settings
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| **API Key** | Your Anthropic API key | Required |
-| **Model** | Claude model to use (auto-updating alias) | claude-3-5-sonnet-latest |
-| **Custom Prompt** | Instructions for alt text generation | "Generate a brief alt text description for this image:" |
-| **Language** | Output language code | en |
-| **Max Tokens** | Maximum length of generated text | 200 |
-| **Debug Mode** | Enable detailed logging | Off |
+| Setting | Description | Default | Range/Options |
+|---------|-------------|---------|---------------|
+| **API Key** | Your Anthropic API key | Required | Starts with `sk-ant-api` |
+| **Model** | Claude model to use (auto-updating alias) | claude-3-5-sonnet-latest | See models table below |
+| **Custom Prompt** | Instructions for alt text generation | "Generate a brief alt text description for this image:" | Any text |
+| **Language** | Output language for alt text | en | Any language code (en, es, fr, de, it, pt, ja, zh, etc.) |
+| **Max Tokens** | Maximum length of generated alt text | 200 | 50-500 tokens |
+| **Debug Mode** | Enable detailed logging | Off | On/Off |
+
+#### Language Settings
+The plugin can generate alt text in any language. Common language codes:
+- `en` - English (default)
+- `es` - Spanish
+- `fr` - French
+- `de` - German
+- `it` - Italian
+- `pt` - Portuguese
+- `ja` - Japanese
+- `zh` - Chinese
+- `ar` - Arabic
+- `ru` - Russian
+- `hi` - Hindi
+- `ko` - Korean
+
+#### Token Limits
+- **50-100 tokens**: Very brief descriptions (1-2 sentences)
+- **150-200 tokens**: Standard alt text (2-3 sentences) - **Recommended**
+- **300-500 tokens**: Detailed descriptions (paragraph length)
 
 ### Available Models (Using Auto-updating Aliases)
 
@@ -83,6 +103,26 @@ A powerful WordPress plugin that automatically generates accessible alt text for
 | `claude-opus-4-1` | Claude Opus 4.1 | Latest Opus 4.1.x (Most powerful) |
 
 > **🎯 Benefit of Aliases:** The plugin now uses model aliases that automatically point to the newest model versions. When Anthropic releases updates, your plugin will use them without any configuration changes!
+
+### Configuration Examples
+
+#### Example 1: E-commerce Site (English)
+- **Model**: `claude-3-5-sonnet-latest` (balanced quality/speed)
+- **Language**: `en`
+- **Max Tokens**: `150`
+- **Custom Prompt**: "Generate SEO-friendly alt text focusing on product features, color, and style:"
+
+#### Example 2: News Website (Spanish)
+- **Model**: `claude-3-5-haiku-latest` (fast for high volume)
+- **Language**: `es`
+- **Max Tokens**: `200`
+- **Custom Prompt**: "Genera texto alternativo describiendo personas, acciones y contexto noticioso:"
+
+#### Example 3: Art Gallery (French)
+- **Model**: `claude-opus-4-1` (highest quality)
+- **Language**: `fr`
+- **Max Tokens**: `300`
+- **Custom Prompt**: "Décrivez cette œuvre d'art en détaillant le style, le médium et l'ambiance:"
 
 ## 📖 Usage Guide
 
@@ -175,7 +215,8 @@ Access these at:
 2. **Choose the Right Model** - Use Sonnet for balance, Haiku for speed, Opus for quality
 3. **Customize Prompts** - Tailor the prompt to your specific needs
 4. **Set Appropriate Token Limits** - 150-200 tokens usually sufficient for alt text
-5. **Process in Batches** - For large libraries, process 10-20 images at a time
+5. **Adjust Language Output** - Set language code (en, es, fr, etc.) for localized alt text
+6. **Process in Batches** - For large libraries, process 10-20 images at a time
 
 ### Accessibility Guidelines
 
