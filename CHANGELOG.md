@@ -5,7 +5,7 @@ All notable changes to the Custom AI Image Description Generator plugin will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.1.0] - 2025-01-11
+## [2.1.0] - 2025-08-11
 
 ### Changed
 - 🚀 **Switched to model aliases** for automatic updates
@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🔧 Zero maintenance: No plugin updates needed for new models
 - ⚡ Always current: Uses latest Claude capabilities
 
-## [2.0.0] - 2025-01-11
+## [2.0.0] - 2025-08-11
 
 ### Added
 - ✨ AJAX support for smooth, no-reload bulk operations
