@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: Custom AI Image Description Generator
-Description: Automatically generates alt text for images using Claude API or OpenRouter (supporting multiple AI models)
-Version: 2.2
+Description: Automatically generates alt text for images using Claude API or OpenRouter (90+ vision models with automatic discovery)
+Version: 2.3
 Author: Your Name
 */
 
@@ -94,6 +94,108 @@ function custom_ai_image_description_openrouter_api_key_callback() {
     echo '</div>';
 }
 
+// Fetch vision-capable models from OpenRouter API
+function custom_ai_image_description_fetch_openrouter_models() {
+    // Check cache first (valid for 24 hours)
+    $cached_models = get_transient('custom_ai_openrouter_vision_models');
+    if ($cached_models !== false) {
+        return $cached_models;
+    }
+    
+    // Fetch from OpenRouter API
+    $response = wp_remote_get('https://openrouter.ai/api/v1/models', array(
+        'timeout' => 30
+    ));
+    
+    if (is_wp_error($response)) {
+        // Return fallback models if API fails
+        return custom_ai_image_description_get_fallback_openrouter_models();
+    }
+    
+    $body = wp_remote_retrieve_body($response);
+    $data = json_decode($body, true);
+    
+    if (!isset($data['data']) || !is_array($data['data'])) {
+        return custom_ai_image_description_get_fallback_openrouter_models();
+    }
+    
+    $vision_models = array();
+    
+    foreach ($data['data'] as $model) {
+        // Check if model supports image input
+        $has_vision = false;
+        
+        // Check architecture.input_modalities array
+        if (isset($model['architecture']['input_modalities']) && 
+            is_array($model['architecture']['input_modalities']) &&
+            in_array('image', $model['architecture']['input_modalities'])) {
+            $has_vision = true;
+        }
+        
+        // Check architecture.modality string
+        if (!$has_vision && isset($model['architecture']['modality']) && 
+            strpos($model['architecture']['modality'], 'image') !== false) {
+            $has_vision = true;
+        }
+        
+        if ($has_vision) {
+            $id = $model['id'];
+            $name = $model['name'] ?? $id;
+            
+            // Add pricing info to name
+            if (isset($model['pricing'])) {
+                $prompt_cost = floatval($model['pricing']['prompt'] ?? 0) * 1000000;
+                if ($prompt_cost == 0) {
+                    $name .= ' (Free)';
+                } else if ($prompt_cost < 0.5) {
+                    $name .= ' (💰 Cheap)';
+                } else if ($prompt_cost > 5) {
+                    $name .= ' (💎 Premium)';
+                }
+            }
+            
+            // Add context length if significant
+            if (isset($model['context_length']) && $model['context_length'] > 100000) {
+                $name .= ' [' . round($model['context_length'] / 1000) . 'K]';
+            }
+            
+            $vision_models[$id] = $name;
+        }
+    }
+    
+    // Sort models by provider and name
+    uksort($vision_models, function($a, $b) {
+        // Prioritize certain providers
+        $priority_providers = ['anthropic/', 'openai/', 'google/', 'meta-llama/'];
+        foreach ($priority_providers as $provider) {
+            if (strpos($a, $provider) === 0 && strpos($b, $provider) !== 0) return -1;
+            if (strpos($b, $provider) === 0 && strpos($a, $provider) !== 0) return 1;
+        }
+        return strcasecmp($a, $b);
+    });
+    
+    // Cache for 24 hours
+    set_transient('custom_ai_openrouter_vision_models', $vision_models, DAY_IN_SECONDS);
+    
+    return $vision_models;
+}
+
+// Fallback models if API is unavailable
+function custom_ai_image_description_get_fallback_openrouter_models() {
+    return array(
+        'anthropic/claude-3.5-sonnet' => 'Claude 3.5 Sonnet',
+        'anthropic/claude-3-opus' => 'Claude 3 Opus',
+        'anthropic/claude-3-haiku' => 'Claude 3 Haiku',
+        'openai/gpt-4o' => 'GPT-4o',
+        'openai/gpt-4o-mini' => 'GPT-4o Mini',
+        'openai/gpt-4-turbo' => 'GPT-4 Turbo',
+        'google/gemini-pro-1.5' => 'Gemini Pro 1.5',
+        'google/gemini-flash-1.5' => 'Gemini Flash 1.5',
+        'meta-llama/llama-3.2-90b-vision-instruct' => 'Llama 3.2 90B Vision',
+        'meta-llama/llama-3.2-11b-vision-instruct' => 'Llama 3.2 11B Vision'
+    );
+}
+
 function custom_ai_image_description_model_callback() {
     $model = get_option('custom_ai_image_description_model', 'claude-3-5-sonnet-latest');
     $provider = get_option('custom_ai_image_description_api_provider', 'claude');
@@ -108,19 +210,8 @@ function custom_ai_image_description_model_callback() {
         'claude-opus-4-1' => 'Claude Opus 4.1 (Most Powerful - Auto-updates)'
     );
     
-    // OpenRouter models (popular vision-capable models)
-    $openrouter_models = array(
-        'anthropic/claude-3.5-sonnet' => 'Claude 3.5 Sonnet (via OpenRouter)',
-        'anthropic/claude-3-opus' => 'Claude 3 Opus (Most Powerful)',
-        'anthropic/claude-3-haiku' => 'Claude 3 Haiku (Fast & Cheap)',
-        'openai/gpt-4o' => 'GPT-4o (OpenAI Latest)',
-        'openai/gpt-4o-mini' => 'GPT-4o Mini (Fast & Cheap)',
-        'openai/gpt-4-turbo' => 'GPT-4 Turbo (Vision)',
-        'google/gemini-pro-1.5' => 'Gemini Pro 1.5 (Google)',
-        'google/gemini-flash-1.5' => 'Gemini Flash 1.5 (Fast)',
-        'meta-llama/llama-3.2-90b-vision-instruct' => 'Llama 3.2 90B Vision',
-        'meta-llama/llama-3.2-11b-vision-instruct' => 'Llama 3.2 11B Vision (Fast)'
-    );
+    // Get OpenRouter models dynamically (with caching)
+    $openrouter_models = custom_ai_image_description_fetch_openrouter_models();
     
     echo '<select name="custom_ai_image_description_model" id="model_select">';
     
@@ -139,9 +230,21 @@ function custom_ai_image_description_model_callback() {
     echo '</optgroup>';
     
     echo '</select>';
+    
+    // Add refresh button for OpenRouter models
+    if ($provider === 'openrouter') {
+        echo ' <button type="button" id="refresh_openrouter_models" class="button button-secondary" style="margin-left: 10px;">🔄 Refresh Models</button>';
+        echo '<span id="refresh_status" style="margin-left: 10px; display: none;"></span>';
+    }
+    
     echo '<p class="description">Select the AI model to use for generating alt text. Models vary in capability, speed, and cost.</p>';
     
-    // Add JavaScript to handle provider switching
+    // Add note about dynamic fetching for OpenRouter
+    if ($provider === 'openrouter') {
+        echo '<p class="description"><strong>Note:</strong> OpenRouter models are fetched automatically from their API. Click "Refresh Models" to update the list with the latest available vision-capable models.</p>';
+    }
+    
+    // Add JavaScript to handle provider switching and model refresh
     ?>
     <script type="text/javascript">
     jQuery(document).ready(function($) {
@@ -156,12 +259,53 @@ function custom_ai_image_description_model_callback() {
             $('.model-group').hide();
             $('.model-group[data-provider="' + provider + '"]').show();
             
+            // Show/hide refresh button
+            if (provider === 'openrouter') {
+                $('#refresh_openrouter_models').show();
+            } else {
+                $('#refresh_openrouter_models').hide();
+            }
+            
             // Select first available model for the provider if current selection is incompatible
             var currentModel = $('#model_select').val();
             var currentOption = $('#model_select option[value="' + currentModel + '"]');
             if (currentOption.attr('data-provider') !== provider) {
                 $('#model_select option[data-provider="' + provider + '"]:first').prop('selected', true);
             }
+        });
+        
+        // Refresh OpenRouter models
+        $('#refresh_openrouter_models').on('click', function(e) {
+            e.preventDefault();
+            var $button = $(this);
+            var $status = $('#refresh_status');
+            
+            $button.prop('disabled', true);
+            $status.show().html('Fetching models...');
+            
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'caidg_refresh_openrouter_models',
+                    nonce: '<?php echo wp_create_nonce('caidg_refresh_models'); ?>'
+                },
+                success: function(response) {
+                    if (response.success) {
+                        $status.html('✅ Models updated! Found ' + response.data.count + ' vision models. Refreshing page...');
+                        setTimeout(function() {
+                            location.reload();
+                        }, 1500);
+                    } else {
+                        $status.html('❌ Error: ' + response.data);
+                        $button.prop('disabled', false);
+                    }
+                },
+                error: function() {
+                    $status.html('❌ Network error. Please try again.');
+                    $button.prop('disabled', false);
+                }
+            });
         });
         
         // Trigger change on page load to ensure correct visibility
@@ -549,6 +693,38 @@ add_action('admin_notices', 'custom_ai_image_description_bulk_action_admin_notic
 
 // AJAX handlers
 add_action('wp_ajax_caidg_generate_alt_text', 'custom_ai_ajax_generate_alt_text');
+add_action('wp_ajax_caidg_refresh_openrouter_models', 'custom_ai_ajax_refresh_openrouter_models');
+
+// AJAX handler for refreshing OpenRouter models
+function custom_ai_ajax_refresh_openrouter_models() {
+    // Verify nonce
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'caidg_refresh_models')) {
+        wp_send_json_error('Security check failed');
+        return;
+    }
+    
+    // Check permissions
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Insufficient permissions');
+        return;
+    }
+    
+    // Clear the cache
+    delete_transient('custom_ai_openrouter_vision_models');
+    
+    // Fetch fresh models
+    $models = custom_ai_image_description_fetch_openrouter_models();
+    
+    if ($models && count($models) > 0) {
+        wp_send_json_success(array(
+            'count' => count($models),
+            'models' => $models
+        ));
+    } else {
+        wp_send_json_error('Failed to fetch models from OpenRouter API');
+    }
+}
+
 function custom_ai_ajax_generate_alt_text() {
     // Verify nonce
     if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'caidg_ajax_nonce')) {

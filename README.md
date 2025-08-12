@@ -4,7 +4,7 @@ A powerful WordPress plugin that automatically generates accessible alt text for
 
 ![WordPress Version](https://img.shields.io/badge/WordPress-5.0%2B-blue)
 ![PHP Version](https://img.shields.io/badge/PHP-7.4%2B-purple)
-![Plugin Version](https://img.shields.io/badge/Version-2.1-green)
+![Plugin Version](https://img.shields.io/badge/Version-2.3-green)
 ![License](https://img.shields.io/badge/License-GPL%20v2-red)
 
 ## ✨ Features
@@ -119,20 +119,24 @@ The plugin can generate alt text in any language. **Important**: The prompt can 
 
 #### OpenRouter Models (Multiple Providers)
 
-| Model ID | Provider | Description |
-|----------|----------|-------------|
-| `anthropic/claude-3.5-sonnet` | Anthropic | Claude 3.5 Sonnet via OpenRouter |
-| `anthropic/claude-3-opus` | Anthropic | Claude 3 Opus (Most powerful) |
-| `anthropic/claude-3-haiku` | Anthropic | Claude 3 Haiku (Fast & cheap) |
-| `openai/gpt-4o` | OpenAI | GPT-4o (Latest OpenAI) |
-| `openai/gpt-4o-mini` | OpenAI | GPT-4o Mini (Fast & economical) |
-| `openai/gpt-4-turbo` | OpenAI | GPT-4 Turbo with Vision |
-| `google/gemini-pro-1.5` | Google | Gemini Pro 1.5 |
-| `google/gemini-flash-1.5` | Google | Gemini Flash 1.5 (Fast) |
-| `meta-llama/llama-3.2-90b-vision-instruct` | Meta | Llama 3.2 90B Vision |
-| `meta-llama/llama-3.2-11b-vision-instruct` | Meta | Llama 3.2 11B Vision (Fast) |
+**🚀 NEW: Automatic Model Discovery!** The plugin now automatically fetches all vision-capable models from OpenRouter's API. You get access to 90+ vision models that are updated in real-time!
 
-> **💡 OpenRouter Benefits:** Access multiple providers with one API key, automatic fallbacks, and usage-based pricing across all models!
+**Popular Vision Models Include:**
+- **Anthropic:** Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku
+- **OpenAI:** GPT-5, GPT-4o, GPT-4o Mini, GPT-4 Turbo
+- **Google:** Gemini 2.5 Flash, Gemini Pro 1.5
+- **Meta:** Llama 3.2 Vision (11B, 90B)
+- **xAI:** Grok 4
+- **And 80+ more models...**
+
+**Features:**
+- ✅ Automatic model discovery - always up-to-date
+- 💰 Pricing indicators (Free, Cheap, Premium)
+- 📏 Context length indicators for large-context models
+- 🔄 Refresh button to update model list on-demand
+- 💾 24-hour caching for optimal performance
+
+> **💡 OpenRouter Benefits:** Access to 90+ vision models from all major providers with one API key, automatic model updates, and pay-per-use pricing!
 
 ### Configuration Examples
 

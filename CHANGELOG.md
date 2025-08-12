@@ -5,6 +5,37 @@ All notable changes to the Custom AI Image Description Generator plugin will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2025-08-11
+
+### Added
+- 🎯 **Automatic Vision Model Discovery** for OpenRouter
+  - Dynamically fetches all vision-capable models from OpenRouter API
+  - Access to 90+ vision models (up from 10 hardcoded)
+  - Real-time model availability updates
+- 🔄 **Refresh Models Button** in settings
+  - On-demand model list updates
+  - Shows count of discovered models
+  - AJAX-powered for smooth experience
+- 💾 **Smart Caching System**
+  - 24-hour cache for model list
+  - Reduces API calls
+  - Manual refresh option available
+- 💰 **Pricing Indicators** for models
+  - Free models marked clearly
+  - Cheap/Premium indicators
+  - Context length shown for large models
+
+### Changed
+- OpenRouter models now fetched dynamically instead of hardcoded
+- Model dropdown populates from live API data
+- Improved model sorting (prioritizes major providers)
+
+### Technical
+- Added `custom_ai_image_description_fetch_openrouter_models()` function
+- Added `custom_ai_ajax_refresh_openrouter_models()` AJAX handler
+- Uses WordPress transients for caching
+- Fallback models if API unavailable
+
 ## [2.2.0] - 2025-08-11
 
 ### Added
