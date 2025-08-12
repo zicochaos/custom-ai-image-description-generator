@@ -5,6 +5,31 @@ All notable changes to the Custom AI Image Description Generator plugin will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2025-08-11
+
+### Added
+- 🚀 **OpenRouter API Integration** - Support for multiple AI providers
+  - Access to GPT-4o, Gemini, Llama Vision models and more
+  - Single API key for multiple providers
+  - Cost-effective usage-based pricing
+- 🎛️ API Provider Selection in settings
+  - Toggle between Claude direct API and OpenRouter
+  - Dynamic model selection based on provider
+  - Automatic UI updates when switching providers
+- 🧪 Test script for OpenRouter integration (`test-openrouter.php`)
+- 📚 Support for 10+ vision-capable models through OpenRouter
+
+### Changed
+- Plugin name simplified to "Custom AI Image Description Generator"
+- Settings page reorganized with provider selection
+- Model dropdown now shows provider-specific models
+
+### Technical
+- Added `custom_ai_image_description_generate_openrouter()` function
+- Added provider switching JavaScript in admin
+- OpenRouter uses OpenAI-compatible request format
+- Both APIs support same features (retry, debug, bulk processing)
+
 ## [2.1.1] - 2025-08-11
 
 ### Documentation

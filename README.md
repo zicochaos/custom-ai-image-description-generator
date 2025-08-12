@@ -102,7 +102,9 @@ The plugin can generate alt text in any language. **Important**: The prompt can 
 - **150-200 tokens**: Standard alt text (2-3 sentences) - **Recommended**
 - **300-500 tokens**: Detailed descriptions (paragraph length)
 
-### Available Models (Using Auto-updating Aliases)
+### Available Models
+
+#### Claude Models (Direct API - Auto-updating Aliases)
 
 | Model Alias | Description | Auto-updates to |
 |-------------|-------------|-----------------|
@@ -113,7 +115,24 @@ The plugin can generate alt text in any language. **Important**: The prompt can 
 | `claude-opus-4-0` | Claude Opus 4 | Latest Opus 4.x version |
 | `claude-opus-4-1` | Claude Opus 4.1 | Latest Opus 4.1.x (Most powerful) |
 
-> **🎯 Benefit of Aliases:** The plugin now uses model aliases that automatically point to the newest model versions. When Anthropic releases updates, your plugin will use them without any configuration changes!
+> **🎯 Benefit of Aliases:** Claude models use aliases that automatically point to the newest versions!
+
+#### OpenRouter Models (Multiple Providers)
+
+| Model ID | Provider | Description |
+|----------|----------|-------------|
+| `anthropic/claude-3.5-sonnet` | Anthropic | Claude 3.5 Sonnet via OpenRouter |
+| `anthropic/claude-3-opus` | Anthropic | Claude 3 Opus (Most powerful) |
+| `anthropic/claude-3-haiku` | Anthropic | Claude 3 Haiku (Fast & cheap) |
+| `openai/gpt-4o` | OpenAI | GPT-4o (Latest OpenAI) |
+| `openai/gpt-4o-mini` | OpenAI | GPT-4o Mini (Fast & economical) |
+| `openai/gpt-4-turbo` | OpenAI | GPT-4 Turbo with Vision |
+| `google/gemini-pro-1.5` | Google | Gemini Pro 1.5 |
+| `google/gemini-flash-1.5` | Google | Gemini Flash 1.5 (Fast) |
+| `meta-llama/llama-3.2-90b-vision-instruct` | Meta | Llama 3.2 90B Vision |
+| `meta-llama/llama-3.2-11b-vision-instruct` | Meta | Llama 3.2 11B Vision (Fast) |
+
+> **💡 OpenRouter Benefits:** Access multiple providers with one API key, automatic fallbacks, and usage-based pricing across all models!
 
 ### Configuration Examples
 

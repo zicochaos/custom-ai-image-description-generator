@@ -1,8 +1,8 @@
 <?php
 /*
-Plugin Name: Custom AI Image Description Generator (Claude)
-Description: Automatically generates alt text for images using Anthropic's Claude API with auto-updating model aliases
-Version: 2.1
+Plugin Name: Custom AI Image Description Generator
+Description: Automatically generates alt text for images using Claude API or OpenRouter (supporting multiple AI models)
+Version: 2.2
 Author: Your Name
 */
 
@@ -35,7 +35,9 @@ function custom_ai_image_description_settings_page_html() {
 
 // Register settings
 function custom_ai_image_description_register_settings() {
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_api_provider');
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_claude_api_key');
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_openrouter_api_key');
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_model');
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_prompt');
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_language');
@@ -44,8 +46,10 @@ function custom_ai_image_description_register_settings() {
 
     add_settings_section('custom_ai_image_description_settings', 'API Settings', 'custom_ai_image_description_settings_section_callback', 'custom_ai_image_description_options');
     
+    add_settings_field('custom_ai_image_description_api_provider', 'API Provider', 'custom_ai_image_description_api_provider_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
     add_settings_field('custom_ai_image_description_claude_api_key', 'Claude API Key', 'custom_ai_image_description_claude_api_key_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
-    add_settings_field('custom_ai_image_description_model', 'Claude Model', 'custom_ai_image_description_model_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
+    add_settings_field('custom_ai_image_description_openrouter_api_key', 'OpenRouter API Key', 'custom_ai_image_description_openrouter_api_key_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
+    add_settings_field('custom_ai_image_description_model', 'AI Model', 'custom_ai_image_description_model_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
     add_settings_field('custom_ai_image_description_prompt', 'Custom Prompt', 'custom_ai_image_description_prompt_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
     add_settings_field('custom_ai_image_description_language', 'Language', 'custom_ai_image_description_language_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
     add_settings_field('custom_ai_image_description_max_tokens', 'Max Tokens', 'custom_ai_image_description_max_tokens_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
@@ -55,20 +59,47 @@ add_action('admin_init', 'custom_ai_image_description_register_settings');
 
 // Settings section callback
 function custom_ai_image_description_settings_section_callback() {
-    echo '<p>Enter your Claude API settings below:</p>';
+    echo '<p>Configure your AI API settings below. You can use either Claude API directly or OpenRouter for access to multiple models.</p>';
 }
 
 // Settings field callbacks
+function custom_ai_image_description_api_provider_callback() {
+    $provider = get_option('custom_ai_image_description_api_provider', 'claude');
+    ?>
+    <select name="custom_ai_image_description_api_provider" id="api_provider_select">
+        <option value="claude" <?php selected($provider, 'claude'); ?>>Claude (Anthropic)</option>
+        <option value="openrouter" <?php selected($provider, 'openrouter'); ?>>OpenRouter</option>
+    </select>
+    <p class="description">Choose your API provider. OpenRouter provides access to multiple AI models including Claude, GPT-4, and more.</p>
+    <?php
+}
+
 function custom_ai_image_description_claude_api_key_callback() {
     $api_key = get_option('custom_ai_image_description_claude_api_key');
+    $provider = get_option('custom_ai_image_description_api_provider', 'claude');
+    $style = ($provider !== 'claude') ? 'display:none;' : '';
+    echo '<div class="api-key-field" data-provider="claude" style="' . $style . '">';
     echo '<input type="password" name="custom_ai_image_description_claude_api_key" value="' . esc_attr($api_key) . '" size="50">';
     echo '<p class="description">Get your API key from <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a></p>';
+    echo '</div>';
+}
+
+function custom_ai_image_description_openrouter_api_key_callback() {
+    $api_key = get_option('custom_ai_image_description_openrouter_api_key');
+    $provider = get_option('custom_ai_image_description_api_provider', 'claude');
+    $style = ($provider !== 'openrouter') ? 'display:none;' : '';
+    echo '<div class="api-key-field" data-provider="openrouter" style="' . $style . '">';
+    echo '<input type="password" name="custom_ai_image_description_openrouter_api_key" value="' . esc_attr($api_key) . '" size="50">';
+    echo '<p class="description">Get your API key from <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a></p>';
+    echo '</div>';
 }
 
 function custom_ai_image_description_model_callback() {
     $model = get_option('custom_ai_image_description_model', 'claude-3-5-sonnet-latest');
-    // Using aliases for automatic updates to latest model versions
-    $models = array(
+    $provider = get_option('custom_ai_image_description_api_provider', 'claude');
+    
+    // Claude models (for direct API)
+    $claude_models = array(
         'claude-3-5-sonnet-latest' => 'Claude 3.5 Sonnet (Recommended - Auto-updates)',
         'claude-3-5-haiku-latest' => 'Claude 3.5 Haiku (Fast & Economical - Auto-updates)',
         'claude-3-7-sonnet-latest' => 'Claude 3.7 Sonnet (Latest - Auto-updates)',
@@ -76,12 +107,68 @@ function custom_ai_image_description_model_callback() {
         'claude-opus-4-0' => 'Claude Opus 4 (Auto-updates)',
         'claude-opus-4-1' => 'Claude Opus 4.1 (Most Powerful - Auto-updates)'
     );
-    echo '<select name="custom_ai_image_description_model">';
-    foreach ($models as $model_id => $model_name) {
-        echo '<option value="' . esc_attr($model_id) . '" ' . selected($model, $model_id, false) . '>' . esc_html($model_name) . '</option>';
+    
+    // OpenRouter models (popular vision-capable models)
+    $openrouter_models = array(
+        'anthropic/claude-3.5-sonnet' => 'Claude 3.5 Sonnet (via OpenRouter)',
+        'anthropic/claude-3-opus' => 'Claude 3 Opus (Most Powerful)',
+        'anthropic/claude-3-haiku' => 'Claude 3 Haiku (Fast & Cheap)',
+        'openai/gpt-4o' => 'GPT-4o (OpenAI Latest)',
+        'openai/gpt-4o-mini' => 'GPT-4o Mini (Fast & Cheap)',
+        'openai/gpt-4-turbo' => 'GPT-4 Turbo (Vision)',
+        'google/gemini-pro-1.5' => 'Gemini Pro 1.5 (Google)',
+        'google/gemini-flash-1.5' => 'Gemini Flash 1.5 (Fast)',
+        'meta-llama/llama-3.2-90b-vision-instruct' => 'Llama 3.2 90B Vision',
+        'meta-llama/llama-3.2-11b-vision-instruct' => 'Llama 3.2 11B Vision (Fast)'
+    );
+    
+    echo '<select name="custom_ai_image_description_model" id="model_select">';
+    
+    // Show Claude models when Claude provider is selected
+    echo '<optgroup label="Claude Models" class="model-group" data-provider="claude" style="' . ($provider !== 'claude' ? 'display:none;' : '') . '">';
+    foreach ($claude_models as $model_id => $model_name) {
+        echo '<option value="' . esc_attr($model_id) . '" ' . selected($model, $model_id, false) . ' data-provider="claude">' . esc_html($model_name) . '</option>';
     }
+    echo '</optgroup>';
+    
+    // Show OpenRouter models when OpenRouter provider is selected
+    echo '<optgroup label="OpenRouter Models" class="model-group" data-provider="openrouter" style="' . ($provider !== 'openrouter' ? 'display:none;' : '') . '">';
+    foreach ($openrouter_models as $model_id => $model_name) {
+        echo '<option value="' . esc_attr($model_id) . '" ' . selected($model, $model_id, false) . ' data-provider="openrouter">' . esc_html($model_name) . '</option>';
+    }
+    echo '</optgroup>';
+    
     echo '</select>';
-    echo '<p class="description">Using model aliases ensures you always get the latest version automatically.</p>';
+    echo '<p class="description">Select the AI model to use for generating alt text. Models vary in capability, speed, and cost.</p>';
+    
+    // Add JavaScript to handle provider switching
+    ?>
+    <script type="text/javascript">
+    jQuery(document).ready(function($) {
+        $('#api_provider_select').on('change', function() {
+            var provider = $(this).val();
+            
+            // Show/hide API key fields
+            $('.api-key-field').hide();
+            $('.api-key-field[data-provider="' + provider + '"]').show();
+            
+            // Show/hide model groups
+            $('.model-group').hide();
+            $('.model-group[data-provider="' + provider + '"]').show();
+            
+            // Select first available model for the provider if current selection is incompatible
+            var currentModel = $('#model_select').val();
+            var currentOption = $('#model_select option[value="' + currentModel + '"]');
+            if (currentOption.attr('data-provider') !== provider) {
+                $('#model_select option[data-provider="' + provider + '"]:first').prop('selected', true);
+            }
+        });
+        
+        // Trigger change on page load to ensure correct visibility
+        $('#api_provider_select').trigger('change');
+    });
+    </script>
+    <?php
 }
 
 function custom_ai_image_description_prompt_callback() {
@@ -105,8 +192,19 @@ function custom_ai_image_description_debug_mode_callback() {
     echo '<label for="custom_ai_image_description_debug_mode">Enable debug mode (logs API responses)</label>';
 }
 
-// Generate alt text using Claude API
+// Generate alt text using selected API provider
 function custom_ai_image_description_generate($image_url, $image_title = '') {
+    $provider = get_option('custom_ai_image_description_api_provider', 'claude');
+    
+    if ($provider === 'openrouter') {
+        return custom_ai_image_description_generate_openrouter($image_url, $image_title);
+    } else {
+        return custom_ai_image_description_generate_claude($image_url, $image_title);
+    }
+}
+
+// Generate alt text using Claude API
+function custom_ai_image_description_generate_claude($image_url, $image_title = '') {
     $api_key = get_option('custom_ai_image_description_claude_api_key');
     $model = get_option('custom_ai_image_description_model', 'claude-3-5-sonnet-latest');
     $prompt = get_option('custom_ai_image_description_prompt', 'Generate a brief alt text description for this image:');
@@ -212,6 +310,130 @@ function custom_ai_image_description_generate($image_url, $image_title = '') {
 
     error_log('Custom AI Image Description Generator Error: Invalid response structure from Claude API');
     return new WP_Error('invalid_response', 'Invalid response from Claude API');
+}
+
+// Generate alt text using OpenRouter API
+function custom_ai_image_description_generate_openrouter($image_url, $image_title = '') {
+    $api_key = get_option('custom_ai_image_description_openrouter_api_key');
+    $model = get_option('custom_ai_image_description_model', 'anthropic/claude-3.5-sonnet');
+    $prompt = get_option('custom_ai_image_description_prompt', 'Generate a brief alt text description for this image:');
+    $language = get_option('custom_ai_image_description_language', 'en');
+    $max_tokens = intval(get_option('custom_ai_image_description_max_tokens', 200));
+    $debug_mode = get_option('custom_ai_image_description_debug_mode', false);
+
+    if (empty($api_key)) {
+        error_log('Custom AI Image Description Generator Error: OpenRouter API key is missing');
+        return new WP_Error('missing_api_key', 'OpenRouter API key is missing');
+    }
+
+    // Get image content
+    $image_content = file_get_contents($image_url);
+    if ($image_content === false) {
+        error_log("Custom AI Image Description Generator Error: Failed to fetch image content from URL: $image_url");
+        return new WP_Error('image_fetch_error', 'Failed to fetch image content');
+    }
+    
+    // Detect actual image type
+    $image_info = getimagesizefromstring($image_content);
+    if ($image_info === false) {
+        error_log("Custom AI Image Description Generator Error: Invalid image format for URL: $image_url");
+        return new WP_Error('invalid_image', 'Invalid image format');
+    }
+    
+    $mime_type = $image_info['mime'];
+    $base64_image = base64_encode($image_content);
+    
+    if ($debug_mode) {
+        error_log("Image MIME type detected: " . $mime_type);
+        error_log("Image size: " . strlen($image_content) . " bytes");
+        error_log("Using OpenRouter model: " . $model);
+    }
+
+    // Prepare the message for OpenRouter
+    $system_prompt = "You are an AI assistant that generates concise and accurate alt text descriptions for images in $language. Focus on key visual elements and provide descriptions that enhance accessibility. Be specific but concise.";
+    
+    $user_message = $prompt;
+    if (!empty($image_title)) {
+        $user_message .= " The image title is: \"$image_title\".";
+    }
+    $user_message .= " Please provide a clear, concise description suitable for alt text.";
+    
+    // OpenRouter uses OpenAI-compatible format
+    $messages = [
+        [
+            "role" => "system",
+            "content" => $system_prompt
+        ],
+        [
+            "role" => "user",
+            "content" => [
+                [
+                    "type" => "text",
+                    "text" => $user_message
+                ],
+                [
+                    "type" => "image_url",
+                    "image_url" => [
+                        "url" => "data:$mime_type;base64,$base64_image"
+                    ]
+                ]
+            ]
+        ]
+    ];
+
+    $request_body = [
+        'model' => $model,
+        'messages' => $messages,
+        'max_tokens' => $max_tokens,
+        'temperature' => 0.3
+    ];
+
+    $args = [
+        'timeout' => 60,
+        'headers' => [
+            'Authorization' => 'Bearer ' . $api_key,
+            'Content-Type' => 'application/json',
+            'HTTP-Referer' => get_site_url(), // Optional but recommended by OpenRouter
+            'X-Title' => get_bloginfo('name') // Optional site name for OpenRouter analytics
+        ],
+        'body' => json_encode($request_body)
+    ];
+
+    $response = wp_remote_post('https://openrouter.ai/api/v1/chat/completions', $args);
+
+    if (is_wp_error($response)) {
+        $error_message = $response->get_error_message();
+        error_log("Custom AI Image Description Generator Error: Error connecting to OpenRouter API: $error_message");
+        return new WP_Error('api_error', 'Error connecting to OpenRouter API: ' . $error_message);
+    }
+
+    $response_code = wp_remote_retrieve_response_code($response);
+    $response_body = wp_remote_retrieve_body($response);
+    $body = json_decode($response_body, true);
+    
+    if ($debug_mode) {
+        error_log('OpenRouter API Response Code: ' . $response_code);
+        error_log('OpenRouter API Response: ' . print_r($body, true));
+    }
+    
+    if ($response_code !== 200) {
+        $error_message = isset($body['error']['message']) ? $body['error']['message'] : wp_remote_retrieve_response_message($response);
+        error_log("Custom AI Image Description Generator Error: OpenRouter API returned status $response_code: $error_message");
+        
+        if ($debug_mode) {
+            error_log("Request body was: " . json_encode($request_body));
+        }
+        
+        return new WP_Error('api_error', "OpenRouter API error: $error_message");
+    }
+
+    // OpenRouter returns OpenAI-compatible response format
+    if (isset($body['choices'][0]['message']['content'])) {
+        return trim($body['choices'][0]['message']['content']);
+    }
+
+    error_log('Custom AI Image Description Generator Error: Invalid response structure from OpenRouter API');
+    return new WP_Error('invalid_response', 'Invalid response from OpenRouter API');
 }
 
 // Generate alt text with retry mechanism
