@@ -1,10 +1,10 @@
-# Custom AI Image Description Generator (Claude)
+# Custom AI Image Description Generator
 
-A powerful WordPress plugin that automatically generates accessible alt text for images using Anthropic's Claude API.
+A powerful WordPress plugin that automatically generates accessible alt text for images using multiple AI providers: Claude API, OpenAI API, and OpenRouter.
 
 ![WordPress Version](https://img.shields.io/badge/WordPress-5.0%2B-blue)
 ![PHP Version](https://img.shields.io/badge/PHP-7.4%2B-purple)
-![Plugin Version](https://img.shields.io/badge/Version-2.3-green)
+![Plugin Version](https://img.shields.io/badge/Version-2.5-green)
 ![License](https://img.shields.io/badge/License-GPL%20v2-red)
 
 ## ✨ Features
@@ -27,7 +27,10 @@ A powerful WordPress plugin that automatically generates accessible alt text for
 
 - WordPress 5.0 or higher
 - PHP 7.4 or higher
-- Anthropic Claude API key
+- One or more API keys:
+  - Anthropic Claude API key, or
+  - OpenAI API key (v2.4+), or
+  - OpenRouter API key (access to 90+ models)
 - Active internet connection
 
 ## 🚀 Installation
@@ -41,31 +44,47 @@ A powerful WordPress plugin that automatically generates accessible alt text for
 
 3. **Activate the Plugin**
    - Go to WordPress Admin → Plugins
-   - Find "Custom AI Image Description Generator (Claude)"
+   - Find "Custom AI Image Description Generator"
    - Click "Activate"
 
 4. **Configure Settings**
    - Go to Settings → Custom AI Image Description
-   - Enter your Claude API key
+   - Select your preferred API provider (Claude, OpenAI, or OpenRouter)
+   - Enter the corresponding API key
    - Select your preferred model
    - Configure other options as needed
 
 ## ⚙️ Configuration
 
-### Getting an API Key
+### Getting API Keys
 
+#### Claude API Key
 1. Visit [console.anthropic.com](https://console.anthropic.com/)
 2. Sign up or log in to your account
 3. Navigate to API Keys section
 4. Create a new API key
 5. Copy the key (starts with `sk-ant-api`)
 
+#### OpenAI API Key (v2.4+)
+1. Visit [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+2. Sign up or log in to your account
+3. Click "Create new secret key"
+4. Name your key and create it
+5. Copy the key (starts with `sk-`)
+
+#### OpenRouter API Key
+1. Visit [openrouter.ai/keys](https://openrouter.ai/keys)
+2. Sign up or log in to your account
+3. Click "Create Key"
+4. Copy the key (starts with `sk-or-`)
+
 ### Plugin Settings
 
 | Setting | Description | Default | Range/Options |
 |---------|-------------|---------|---------------|
-| **API Key** | Your Anthropic API key | Required | Starts with `sk-ant-api` |
-| **Model** | Claude model to use (auto-updating alias) | claude-3-5-sonnet-latest | See models table below |
+| **API Provider** | Choose your AI provider | claude | claude / openai / openrouter |
+| **API Key** | Your provider API key | Required | Claude: `sk-ant-api`, OpenAI: `sk-`, OpenRouter: `sk-or-` |
+| **Model** | AI model to use | Provider-dependent | See models table below |
 | **Custom Prompt** | Instructions for alt text generation | "Generate a brief alt text description for this image:" | Any text |
 | **Language** | Output language for alt text | en | Any language code (en, es, fr, de, it, pt, ja, zh, etc.) |
 | **Max Tokens** | Maximum length of generated alt text | 200 | 50-500 tokens |
@@ -117,9 +136,26 @@ The plugin can generate alt text in any language. **Important**: The prompt can 
 
 > **🎯 Benefit of Aliases:** Claude models use aliases that automatically point to the newest versions!
 
+#### OpenAI Models (Direct API - v2.4+)
+
+**🆕 NEW: Automatic Model Discovery (v2.5)!** The plugin automatically fetches the latest vision-capable models from OpenAI's API.
+
+| Model | Description | Best for |
+|-------|-------------|----------|
+| `gpt-4o` | GPT-4o | **Recommended** - Latest vision model |
+| `gpt-4o-mini` | GPT-4o Mini | Fast & Cost-effective |
+| `gpt-4-turbo` | GPT-4 Turbo | Vision capable, good balance |
+| `gpt-4-vision-preview` | GPT-4 Vision Preview | Legacy (for compatibility) |
+
+**Features:**
+- ✅ Automatic model discovery - always up-to-date
+- 🔄 Refresh button to update model list on-demand  
+- 💾 24-hour caching for optimal performance
+- 🎯 Vision-only filtering (shows only models that support images)
+
 #### OpenRouter Models (Multiple Providers)
 
-**🚀 NEW: Automatic Model Discovery!** The plugin now automatically fetches all vision-capable models from OpenRouter's API. You get access to 90+ vision models that are updated in real-time!
+**🚀 Automatic Model Discovery!** The plugin automatically fetches all vision-capable models from OpenRouter's API. You get access to 90+ vision models that are updated in real-time!
 
 **Popular Vision Models Include:**
 - **Anthropic:** Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku

@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: Custom AI Image Description Generator
-Description: Automatically generates alt text for images using Claude API or OpenRouter (90+ vision models with automatic discovery)
-Version: 2.3
+Description: Automatically generates alt text for images using Claude API, OpenAI API, or OpenRouter (90+ vision models with automatic discovery)
+Version: 2.5
 Author: Your Name
 */
 
@@ -38,6 +38,7 @@ function custom_ai_image_description_register_settings() {
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_api_provider');
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_claude_api_key');
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_openrouter_api_key');
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_openai_api_key');
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_model');
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_prompt');
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_language');
@@ -49,6 +50,7 @@ function custom_ai_image_description_register_settings() {
     add_settings_field('custom_ai_image_description_api_provider', 'API Provider', 'custom_ai_image_description_api_provider_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
     add_settings_field('custom_ai_image_description_claude_api_key', 'Claude API Key', 'custom_ai_image_description_claude_api_key_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
     add_settings_field('custom_ai_image_description_openrouter_api_key', 'OpenRouter API Key', 'custom_ai_image_description_openrouter_api_key_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
+    add_settings_field('custom_ai_image_description_openai_api_key', 'OpenAI API Key', 'custom_ai_image_description_openai_api_key_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
     add_settings_field('custom_ai_image_description_model', 'AI Model', 'custom_ai_image_description_model_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
     add_settings_field('custom_ai_image_description_prompt', 'Custom Prompt', 'custom_ai_image_description_prompt_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
     add_settings_field('custom_ai_image_description_language', 'Language', 'custom_ai_image_description_language_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
@@ -59,7 +61,7 @@ add_action('admin_init', 'custom_ai_image_description_register_settings');
 
 // Settings section callback
 function custom_ai_image_description_settings_section_callback() {
-    echo '<p>Configure your AI API settings below. You can use either Claude API directly or OpenRouter for access to multiple models.</p>';
+    echo '<p>Configure your AI API settings below. You can use Claude API directly, OpenAI API directly, or OpenRouter for access to multiple models.</p>';
 }
 
 // Settings field callbacks
@@ -68,9 +70,10 @@ function custom_ai_image_description_api_provider_callback() {
     ?>
     <select name="custom_ai_image_description_api_provider" id="api_provider_select">
         <option value="claude" <?php selected($provider, 'claude'); ?>>Claude (Anthropic)</option>
+        <option value="openai" <?php selected($provider, 'openai'); ?>>OpenAI</option>
         <option value="openrouter" <?php selected($provider, 'openrouter'); ?>>OpenRouter</option>
     </select>
-    <p class="description">Choose your API provider. OpenRouter provides access to multiple AI models including Claude, GPT-4, and more.</p>
+    <p class="description">Choose your API provider. OpenAI provides GPT-4 vision models, OpenRouter provides access to multiple AI models including Claude, GPT-4, and more.</p>
     <?php
 }
 
@@ -91,6 +94,16 @@ function custom_ai_image_description_openrouter_api_key_callback() {
     echo '<div class="api-key-field" data-provider="openrouter" style="' . $style . '">';
     echo '<input type="password" name="custom_ai_image_description_openrouter_api_key" value="' . esc_attr($api_key) . '" size="50">';
     echo '<p class="description">Get your API key from <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a></p>';
+    echo '</div>';
+}
+
+function custom_ai_image_description_openai_api_key_callback() {
+    $api_key = get_option('custom_ai_image_description_openai_api_key');
+    $provider = get_option('custom_ai_image_description_api_provider', 'claude');
+    $style = ($provider !== 'openai') ? 'display:none;' : '';
+    echo '<div class="api-key-field" data-provider="openai" style="' . $style . '">';
+    echo '<input type="password" name="custom_ai_image_description_openai_api_key" value="' . esc_attr($api_key) . '" size="50">';
+    echo '<p class="description">Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a></p>';
     echo '</div>';
 }
 
@@ -196,6 +209,118 @@ function custom_ai_image_description_get_fallback_openrouter_models() {
     );
 }
 
+// Fetch vision-capable models from OpenAI API
+function custom_ai_image_description_fetch_openai_models() {
+    // Check cache first (valid for 24 hours)
+    $cached_models = get_transient('custom_ai_openai_vision_models');
+    if ($cached_models !== false) {
+        return $cached_models;
+    }
+    
+    // Get API key for authentication
+    $api_key = get_option('custom_ai_image_description_openai_api_key');
+    if (empty($api_key)) {
+        // Return fallback models if no API key is available
+        return custom_ai_image_description_get_fallback_openai_models();
+    }
+    
+    // Fetch from OpenAI API
+    $response = wp_remote_get('https://api.openai.com/v1/models', array(
+        'timeout' => 30,
+        'headers' => array(
+            'Authorization' => 'Bearer ' . $api_key
+        )
+    ));
+    
+    if (is_wp_error($response)) {
+        // Return fallback models if API fails
+        return custom_ai_image_description_get_fallback_openai_models();
+    }
+    
+    $body = wp_remote_retrieve_body($response);
+    $data = json_decode($body, true);
+    
+    if (!isset($data['data']) || !is_array($data['data'])) {
+        return custom_ai_image_description_get_fallback_openai_models();
+    }
+    
+    $vision_models = array();
+    
+    // Known vision-capable model patterns
+    $vision_patterns = array(
+        'gpt-4o',
+        'gpt-4-turbo',
+        'gpt-4-vision',
+        'chatgpt-4o'
+    );
+    
+    foreach ($data['data'] as $model) {
+        $model_id = $model['id'];
+        $is_vision_model = false;
+        
+        // Check if model matches known vision patterns
+        foreach ($vision_patterns as $pattern) {
+            if (strpos($model_id, $pattern) !== false) {
+                $is_vision_model = true;
+                break;
+            }
+        }
+        
+        // Only include vision-capable models
+        if ($is_vision_model) {
+            // Create display name
+            $display_name = $model_id;
+            
+            // Add descriptive labels for known models
+            if (strpos($model_id, 'gpt-4o') !== false) {
+                if (strpos($model_id, 'mini') !== false) {
+                    $display_name .= ' (Fast & Cost-effective)';
+                } else {
+                    $display_name .= ' (Recommended)';
+                }
+            } elseif (strpos($model_id, 'gpt-4-turbo') !== false) {
+                $display_name .= ' (Vision capable)';
+            } elseif (strpos($model_id, 'gpt-4-vision') !== false) {
+                $display_name .= ' (Legacy Vision)';
+            }
+            
+            $vision_models[$model_id] = $display_name;
+        }
+    }
+    
+    // Sort models by preference (gpt-4o first, then others)
+    uksort($vision_models, function($a, $b) {
+        // Prioritize gpt-4o models
+        if (strpos($a, 'gpt-4o') !== false && strpos($b, 'gpt-4o') === false) return -1;
+        if (strpos($b, 'gpt-4o') !== false && strpos($a, 'gpt-4o') === false) return 1;
+        
+        // Then gpt-4-turbo
+        if (strpos($a, 'gpt-4-turbo') !== false && strpos($b, 'gpt-4-turbo') === false) return -1;
+        if (strpos($b, 'gpt-4-turbo') !== false && strpos($a, 'gpt-4-turbo') === false) return 1;
+        
+        return strcasecmp($a, $b);
+    });
+    
+    // Cache for 24 hours if we got models
+    if (count($vision_models) > 0) {
+        set_transient('custom_ai_openai_vision_models', $vision_models, DAY_IN_SECONDS);
+        return $vision_models;
+    }
+    
+    // Return fallback if no vision models found
+    return custom_ai_image_description_get_fallback_openai_models();
+}
+
+// Fallback models if OpenAI API is unavailable
+function custom_ai_image_description_get_fallback_openai_models() {
+    return array(
+        'gpt-4o' => 'GPT-4o (Recommended - Latest vision model)',
+        'gpt-4o-mini' => 'GPT-4o Mini (Fast & Cost-effective)',
+        'gpt-4-turbo' => 'GPT-4 Turbo (Vision capable)',
+        'gpt-4-vision-preview' => 'GPT-4 Vision Preview (Legacy)'
+    );
+}
+
 function custom_ai_image_description_model_callback() {
     $model = get_option('custom_ai_image_description_model', 'claude-3-5-sonnet-latest');
     $provider = get_option('custom_ai_image_description_api_provider', 'claude');
@@ -210,6 +335,9 @@ function custom_ai_image_description_model_callback() {
         'claude-opus-4-1' => 'Claude Opus 4.1 (Most Powerful - Auto-updates)'
     );
     
+    // Get OpenAI models dynamically (with caching)
+    $openai_models = custom_ai_image_description_fetch_openai_models();
+    
     // Get OpenRouter models dynamically (with caching)
     $openrouter_models = custom_ai_image_description_fetch_openrouter_models();
     
@@ -222,6 +350,13 @@ function custom_ai_image_description_model_callback() {
     }
     echo '</optgroup>';
     
+    // Show OpenAI models when OpenAI provider is selected
+    echo '<optgroup label="OpenAI Models" class="model-group" data-provider="openai" style="' . ($provider !== 'openai' ? 'display:none;' : '') . '">';
+    foreach ($openai_models as $model_id => $model_name) {
+        echo '<option value="' . esc_attr($model_id) . '" ' . selected($model, $model_id, false) . ' data-provider="openai">' . esc_html($model_name) . '</option>';
+    }
+    echo '</optgroup>';
+    
     // Show OpenRouter models when OpenRouter provider is selected
     echo '<optgroup label="OpenRouter Models" class="model-group" data-provider="openrouter" style="' . ($provider !== 'openrouter' ? 'display:none;' : '') . '">';
     foreach ($openrouter_models as $model_id => $model_name) {
@@ -231,17 +366,22 @@ function custom_ai_image_description_model_callback() {
     
     echo '</select>';
     
-    // Add refresh button for OpenRouter models
+    // Add refresh buttons for dynamic model providers
     if ($provider === 'openrouter') {
         echo ' <button type="button" id="refresh_openrouter_models" class="button button-secondary" style="margin-left: 10px;">🔄 Refresh Models</button>';
+        echo '<span id="refresh_status" style="margin-left: 10px; display: none;"></span>';
+    } elseif ($provider === 'openai') {
+        echo ' <button type="button" id="refresh_openai_models" class="button button-secondary" style="margin-left: 10px;">🔄 Refresh Models</button>';
         echo '<span id="refresh_status" style="margin-left: 10px; display: none;"></span>';
     }
     
     echo '<p class="description">Select the AI model to use for generating alt text. Models vary in capability, speed, and cost.</p>';
     
-    // Add note about dynamic fetching for OpenRouter
+    // Add provider-specific notes
     if ($provider === 'openrouter') {
         echo '<p class="description"><strong>Note:</strong> OpenRouter models are fetched automatically from their API. Click "Refresh Models" to update the list with the latest available vision-capable models.</p>';
+    } elseif ($provider === 'openai') {
+        echo '<p class="description"><strong>Note:</strong> OpenAI models are fetched automatically from their API. Click "Refresh Models" to update the list with the latest available vision models. GPT-4o is recommended for best performance.</p>';
     }
     
     // Add JavaScript to handle provider switching and model refresh
@@ -259,11 +399,16 @@ function custom_ai_image_description_model_callback() {
             $('.model-group').hide();
             $('.model-group[data-provider="' + provider + '"]').show();
             
-            // Show/hide refresh button
+            // Show/hide refresh buttons
             if (provider === 'openrouter') {
                 $('#refresh_openrouter_models').show();
+                $('#refresh_openai_models').hide();
+            } else if (provider === 'openai') {
+                $('#refresh_openai_models').show();
+                $('#refresh_openrouter_models').hide();
             } else {
                 $('#refresh_openrouter_models').hide();
+                $('#refresh_openai_models').hide();
             }
             
             // Select first available model for the provider if current selection is incompatible
@@ -288,6 +433,40 @@ function custom_ai_image_description_model_callback() {
                 type: 'POST',
                 data: {
                     action: 'caidg_refresh_openrouter_models',
+                    nonce: '<?php echo wp_create_nonce('caidg_refresh_models'); ?>'
+                },
+                success: function(response) {
+                    if (response.success) {
+                        $status.html('✅ Models updated! Found ' + response.data.count + ' vision models. Refreshing page...');
+                        setTimeout(function() {
+                            location.reload();
+                        }, 1500);
+                    } else {
+                        $status.html('❌ Error: ' + response.data);
+                        $button.prop('disabled', false);
+                    }
+                },
+                error: function() {
+                    $status.html('❌ Network error. Please try again.');
+                    $button.prop('disabled', false);
+                }
+            });
+        });
+        
+        // Refresh OpenAI models
+        $('#refresh_openai_models').on('click', function(e) {
+            e.preventDefault();
+            var $button = $(this);
+            var $status = $('#refresh_status');
+            
+            $button.prop('disabled', true);
+            $status.show().html('Fetching models...');
+            
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'caidg_refresh_openai_models',
                     nonce: '<?php echo wp_create_nonce('caidg_refresh_models'); ?>'
                 },
                 success: function(response) {
@@ -342,6 +521,8 @@ function custom_ai_image_description_generate($image_url, $image_title = '') {
     
     if ($provider === 'openrouter') {
         return custom_ai_image_description_generate_openrouter($image_url, $image_title);
+    } elseif ($provider === 'openai') {
+        return custom_ai_image_description_generate_openai($image_url, $image_title);
     } else {
         return custom_ai_image_description_generate_claude($image_url, $image_title);
     }
@@ -580,6 +761,126 @@ function custom_ai_image_description_generate_openrouter($image_url, $image_titl
     return new WP_Error('invalid_response', 'Invalid response from OpenRouter API');
 }
 
+// Generate alt text using OpenAI API
+function custom_ai_image_description_generate_openai($image_url, $image_title = '') {
+    $api_key = get_option('custom_ai_image_description_openai_api_key');
+    $model = get_option('custom_ai_image_description_model', 'gpt-4o');
+    $prompt = get_option('custom_ai_image_description_prompt', 'Generate a brief alt text description for this image:');
+    $language = get_option('custom_ai_image_description_language', 'en');
+    $max_tokens = intval(get_option('custom_ai_image_description_max_tokens', 200));
+    $debug_mode = get_option('custom_ai_image_description_debug_mode', false);
+
+    if (empty($api_key)) {
+        error_log('Custom AI Image Description Generator Error: OpenAI API key is missing');
+        return new WP_Error('missing_api_key', 'OpenAI API key is missing');
+    }
+
+    // Get image content
+    $image_content = file_get_contents($image_url);
+    if ($image_content === false) {
+        error_log("Custom AI Image Description Generator Error: Failed to fetch image content from URL: $image_url");
+        return new WP_Error('image_fetch_error', 'Failed to fetch image content');
+    }
+    
+    // Detect actual image type
+    $image_info = getimagesizefromstring($image_content);
+    if ($image_info === false) {
+        error_log("Custom AI Image Description Generator Error: Invalid image format for URL: $image_url");
+        return new WP_Error('invalid_image', 'Invalid image format');
+    }
+    
+    $mime_type = $image_info['mime'];
+    $base64_image = base64_encode($image_content);
+    
+    if ($debug_mode) {
+        error_log("Image MIME type detected: " . $mime_type);
+        error_log("Image size: " . strlen($image_content) . " bytes");
+        error_log("Using OpenAI model: " . $model);
+    }
+
+    // Prepare the message for OpenAI
+    $system_prompt = "You are an AI assistant that generates concise and accurate alt text descriptions for images in $language. Focus on key visual elements and provide descriptions that enhance accessibility. Be specific but concise.";
+    
+    $user_message = $prompt;
+    if (!empty($image_title)) {
+        $user_message .= " The image title is: \"$image_title\".";
+    }
+    $user_message .= " Please provide a clear, concise description suitable for alt text.";
+    
+    $messages = [
+        [
+            "role" => "system",
+            "content" => $system_prompt
+        ],
+        [
+            "role" => "user",
+            "content" => [
+                [
+                    "type" => "text",
+                    "text" => $user_message
+                ],
+                [
+                    "type" => "image_url",
+                    "image_url" => [
+                        "url" => "data:$mime_type;base64,$base64_image"
+                    ]
+                ]
+            ]
+        ]
+    ];
+
+    $request_body = [
+        'model' => $model,
+        'messages' => $messages,
+        'max_tokens' => $max_tokens,
+        'temperature' => 0.3
+    ];
+
+    $args = [
+        'timeout' => 60,
+        'headers' => [
+            'Authorization' => 'Bearer ' . $api_key,
+            'Content-Type' => 'application/json'
+        ],
+        'body' => json_encode($request_body)
+    ];
+
+    $response = wp_remote_post('https://api.openai.com/v1/chat/completions', $args);
+
+    if (is_wp_error($response)) {
+        $error_message = $response->get_error_message();
+        error_log("Custom AI Image Description Generator Error: Error connecting to OpenAI API: $error_message");
+        return new WP_Error('api_error', 'Error connecting to OpenAI API: ' . $error_message);
+    }
+
+    $response_code = wp_remote_retrieve_response_code($response);
+    $response_body = wp_remote_retrieve_body($response);
+    $body = json_decode($response_body, true);
+    
+    if ($debug_mode) {
+        error_log('OpenAI API Response Code: ' . $response_code);
+        error_log('OpenAI API Response: ' . print_r($body, true));
+    }
+    
+    if ($response_code !== 200) {
+        $error_message = isset($body['error']['message']) ? $body['error']['message'] : wp_remote_retrieve_response_message($response);
+        error_log("Custom AI Image Description Generator Error: OpenAI API returned status $response_code: $error_message");
+        
+        if ($debug_mode) {
+            error_log("Request body was: " . json_encode($request_body));
+        }
+        
+        return new WP_Error('api_error', "OpenAI API error: $error_message");
+    }
+
+    if (isset($body['choices'][0]['message']['content'])) {
+        return trim($body['choices'][0]['message']['content']);
+    }
+
+    error_log('Custom AI Image Description Generator Error: Invalid response structure from OpenAI API');
+    return new WP_Error('invalid_response', 'Invalid response from OpenAI API');
+}
+
 // Generate alt text with retry mechanism
 function custom_ai_image_description_generate_with_retry($image_url, $image_title = '', $max_retries = 3) {
     for ($i = 0; $i < $max_retries; $i++) {
@@ -694,6 +995,7 @@ add_action('admin_notices', 'custom_ai_image_description_bulk_action_admin_notic
 // AJAX handlers
 add_action('wp_ajax_caidg_generate_alt_text', 'custom_ai_ajax_generate_alt_text');
 add_action('wp_ajax_caidg_refresh_openrouter_models', 'custom_ai_ajax_refresh_openrouter_models');
+add_action('wp_ajax_caidg_refresh_openai_models', 'custom_ai_ajax_refresh_openai_models');
 
 // AJAX handler for refreshing OpenRouter models
 function custom_ai_ajax_refresh_openrouter_models() {
@@ -722,6 +1024,36 @@ function custom_ai_ajax_refresh_openrouter_models() {
         ));
     } else {
         wp_send_json_error('Failed to fetch models from OpenRouter API');
+    }
+}
+
+// AJAX handler for refreshing OpenAI models
+function custom_ai_ajax_refresh_openai_models() {
+    // Verify nonce
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'caidg_refresh_models')) {
+        wp_send_json_error('Security check failed');
+        return;
+    }
+    
+    // Check permissions
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Insufficient permissions');
+        return;
+    }
+    
+    // Clear the cache
+    delete_transient('custom_ai_openai_vision_models');
+    
+    // Fetch fresh models
+    $models = custom_ai_image_description_fetch_openai_models();
+    
+    if ($models && count($models) > 0) {
+        wp_send_json_success(array(
+            'count' => count($models),
+            'models' => $models
+        ));
+    } else {
+        wp_send_json_error('Failed to fetch models from OpenAI API');
     }
 }
 

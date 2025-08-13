@@ -5,6 +5,60 @@ All notable changes to the Custom AI Image Description Generator plugin will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2025-08-13
+
+### Added
+- 🎯 **OpenAI API Automatic Model Discovery**
+  - Fetches latest vision-capable models from OpenAI `/v1/models` API
+  - Smart filtering for vision models only (GPT-4o, GPT-4 Turbo, etc.)
+  - Dynamic model labels and recommendations
+- 🔄 **OpenAI Refresh Models Button** 
+  - Manual model list refresh for OpenAI provider
+  - Shows discovered model count
+  - AJAX-powered with progress feedback
+- 💾 **OpenAI Model Caching**
+  - 24-hour cache for OpenAI models
+  - Reduces API calls and improves performance
+  - Automatic fallback to static models if API fails
+
+### Changed
+- OpenAI models now fetched dynamically instead of static list
+- Improved model sorting (GPT-4o prioritized)
+- Enhanced admin UI with provider-specific refresh buttons
+
+### Technical
+- Added `custom_ai_image_description_fetch_openai_models()` function
+- Added `custom_ai_ajax_refresh_openai_models()` AJAX handler
+- Added `custom_ai_openai_vision_models` transient cache
+- Vision model pattern matching for automatic filtering
+
+## [2.4.0] - 2025-08-13
+
+### Added
+- 🚀 **OpenAI API Direct Integration**
+  - Direct access to OpenAI API without OpenRouter
+  - Support for GPT-4o, GPT-4o Mini, GPT-4 Turbo models
+  - Native OpenAI request format and authentication
+- 🔑 **OpenAI API Key Settings**
+  - Dedicated OpenAI API key field in settings
+  - Provider-specific UI elements and documentation
+  - Secure password field for API key storage
+- 🎛️ **Enhanced Provider Selection**
+  - Three-way provider selection: Claude, OpenAI, OpenRouter
+  - Dynamic model lists based on selected provider
+  - Automatic API key field switching
+
+### Changed
+- Plugin description updated to mention OpenAI support
+- Settings interface reorganized for three providers
+- Model selection now includes OpenAI-specific models
+
+### Technical
+- Added `custom_ai_image_description_generate_openai()` function
+- Updated main generation router for OpenAI provider
+- Enhanced JavaScript for three-provider switching
+- OpenAI uses standard OpenAI API format with Bearer auth
+
 ## [2.3.0] - 2025-08-11
 
 ### Added
