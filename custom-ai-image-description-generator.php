@@ -2,7 +2,7 @@
 /*
 Plugin Name: Custom AI Image Description Generator
 Description: Automatically generates alt text for images using Claude API, OpenAI API, or OpenRouter (90+ vision models with automatic discovery)
-Version: 2.5
+Version: 2.6
 Author: Your Name
 */
 
@@ -10,6 +10,245 @@ Author: Your Name
 if (!defined('ABSPATH')) {
     exit;
 }
+
+// ============================================================================
+// PHASE 1 IMPROVEMENTS: Security & Stability Functions
+// ============================================================================
+
+/**
+ * Error code constants for better error handling
+ */
+class CAIDG_Error_Codes {
+    const AUTH_FAILED = 'auth_failed';
+    const RATE_LIMITED = 'rate_limited';
+    const INVALID_IMAGE = 'invalid_image';
+    const INSUFFICIENT_CREDITS = 'insufficient_credits';
+    const NETWORK_ERROR = 'network_error';
+    const MISSING_API_KEY = 'missing_api_key';
+    const IMAGE_FETCH_ERROR = 'image_fetch_error';
+    const INVALID_RESPONSE = 'invalid_response';
+    const SSRF_BLOCKED = 'ssrf_blocked';
+    const IMAGE_TOO_LARGE = 'image_too_large';
+}
+
+/**
+ * Encrypt API key for secure storage
+ * Uses WordPress AUTH_KEY as encryption key
+ *
+ * @param string $key The API key to encrypt
+ * @return string Encrypted key or original if encryption not available
+ */
+function caidg_encrypt_api_key($key) {
+    if (empty($key) || !defined('AUTH_KEY') || !function_exists('openssl_encrypt')) {
+        return $key;
+    }
+
+    $encryption_key = hash('sha256', AUTH_KEY, true);
+    $iv = openssl_random_pseudo_bytes(16);
+
+    $encrypted = openssl_encrypt($key, 'AES-256-CBC', $encryption_key, 0, $iv);
+
+    // Return base64 encoded IV + encrypted data
+    return base64_encode($iv . $encrypted);
+}
+
+/**
+ * Decrypt API key from storage
+ *
+ * @param string $encrypted The encrypted API key
+ * @return string Decrypted key or original if decryption not available
+ */
+function caidg_decrypt_api_key($encrypted) {
+    if (empty($encrypted) || !defined('AUTH_KEY') || !function_exists('openssl_decrypt')) {
+        return $encrypted;
+    }
+
+    // Check if this looks like an encrypted key (base64)
+    if (!preg_match('/^[A-Za-z0-9+\/=]+$/', $encrypted)) {
+        return $encrypted; // Return as-is if not encrypted format
+    }
+
+    $data = base64_decode($encrypted);
+    if ($data === false || strlen($data) < 16) {
+        return $encrypted; // Return original if can't decode
+    }
+
+    $encryption_key = hash('sha256', AUTH_KEY, true);
+    $iv = substr($data, 0, 16);
+    $encrypted_data = substr($data, 16);
+
+    $decrypted = openssl_decrypt($encrypted_data, 'AES-256-CBC', $encryption_key, 0, $iv);
+
+    return $decrypted !== false ? $decrypted : $encrypted;
+}
+
+/**
+ * Validate API key format based on provider
+ *
+ * @param string $key The API key to validate
+ * @param string $provider The provider (claude, openai, openrouter)
+ * @return bool True if valid format
+ */
+function caidg_validate_api_key_format($key, $provider) {
+    if (empty($key)) {
+        return true; // Empty is OK (user might not have set it yet)
+    }
+
+    $patterns = [
+        'claude' => '/^sk-ant-api[0-9]{2}-[\w-]{95}$/',
+        'openai' => '/^sk-[a-zA-Z0-9\-_]{32,}$/', // More flexible for various key formats
+        'openrouter' => '/^sk-or-v1-[a-f0-9]{64}$/'
+    ];
+
+    if (!isset($patterns[$provider])) {
+        return true; // Unknown provider, don't validate
+    }
+
+    return preg_match($patterns[$provider], $key) === 1;
+}
+
+/**
+ * Check if URL is safe from SSRF attacks
+ * Prevents access to private IP ranges and localhost
+ *
+ * @param string $url The URL to check
+ * @return bool|WP_Error True if safe, WP_Error if blocked
+ */
+function caidg_validate_image_url_safe($url) {
+    $parsed = parse_url($url);
+
+    if (!$parsed || !isset($parsed['host'])) {
+        return new WP_Error(CAIDG_Error_Codes::INVALID_IMAGE, 'Invalid image URL format');
+    }
+
+    // Get IP address
+    $ip = gethostbyname($parsed['host']);
+
+    // Validate it's not a private or reserved IP
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+        error_log("CAIDG Security: Blocked SSRF attempt to private/reserved IP: $ip (host: {$parsed['host']})");
+        return new WP_Error(CAIDG_Error_Codes::SSRF_BLOCKED, 'Access to private/internal IP addresses is not allowed for security reasons');
+    }
+
+    // Additional check: block common localhost patterns
+    $blocked_hosts = ['localhost', '127.0.0.1', '0.0.0.0', '::1'];
+    if (in_array(strtolower($parsed['host']), $blocked_hosts)) {
+        error_log("CAIDG Security: Blocked localhost access attempt: {$parsed['host']}");
+        return new WP_Error(CAIDG_Error_Codes::SSRF_BLOCKED, 'Access to localhost is not allowed for security reasons');
+    }
+
+    return true;
+}
+
+/**
+ * Check rate limit for a specific action
+ * Uses WordPress transients for rate limiting
+ *
+ * @param int $user_id The user ID
+ * @param string $action The action being rate limited
+ * @param int $max_requests Maximum requests allowed
+ * @param int $period Time period in seconds
+ * @return bool True if within rate limit, false if exceeded
+ */
+function caidg_check_rate_limit($user_id, $action, $max_requests = 10, $period = 60) {
+    $key = "caidg_rate_limit_{$action}_{$user_id}";
+    $count = get_transient($key);
+
+    if ($count === false) {
+        // First request in period
+        set_transient($key, 1, $period);
+        return true;
+    }
+
+    if ($count >= $max_requests) {
+        return false;
+    }
+
+    // Increment count
+    set_transient($key, $count + 1, $period);
+    return true;
+}
+
+/**
+ * Map HTTP response code to error code
+ *
+ * @param int $code HTTP response code
+ * @param array $body Response body
+ * @return string Error code constant
+ */
+function caidg_map_api_error($code, $body = []) {
+    switch ($code) {
+        case 401:
+        case 403:
+            return CAIDG_Error_Codes::AUTH_FAILED;
+        case 429:
+            return CAIDG_Error_Codes::RATE_LIMITED;
+        case 402:
+            return CAIDG_Error_Codes::INSUFFICIENT_CREDITS;
+        case 400:
+            // Check if it's an image issue
+            if (isset($body['error']['message']) &&
+                (strpos($body['error']['message'], 'image') !== false ||
+                 strpos($body['error']['message'], 'media') !== false)) {
+                return CAIDG_Error_Codes::INVALID_IMAGE;
+            }
+            return CAIDG_Error_Codes::NETWORK_ERROR;
+        default:
+            return CAIDG_Error_Codes::NETWORK_ERROR;
+    }
+}
+
+/**
+ * Check if error should be retried
+ *
+ * @param string $error_code The error code
+ * @return bool True if should retry
+ */
+function caidg_should_retry_error($error_code) {
+    $retryable = [
+        CAIDG_Error_Codes::NETWORK_ERROR,
+        CAIDG_Error_Codes::RATE_LIMITED
+    ];
+
+    return in_array($error_code, $retryable);
+}
+
+/**
+ * Validate and sanitize max tokens value
+ *
+ * @param int $value The value to sanitize
+ * @return int Clamped value between 50-500
+ */
+function caidg_sanitize_max_tokens($value) {
+    $value = absint($value);
+    return min(max($value, 50), 500);
+}
+
+/**
+ * Sanitize language code
+ *
+ * @param string $value The language code
+ * @return string Sanitized language code
+ */
+function caidg_sanitize_language($value) {
+    // Allow only alphanumeric and hyphens, max 10 chars
+    $value = sanitize_text_field($value);
+    $value = preg_replace('/[^a-z0-9\-]/i', '', $value);
+    return substr($value, 0, 10);
+}
+
+/**
+ * Sanitize and validate API provider
+ *
+ * @param string $value The provider value
+ * @return string Valid provider or 'claude' as default
+ */
+function caidg_sanitize_provider($value) {
+    $allowed = ['claude', 'openai', 'openrouter'];
+    return in_array($value, $allowed) ? $value : 'claude';
+}
+
+// End of Phase 1 helper functions
 
 // Add settings page
 function custom_ai_image_description_settings_page() {
@@ -35,15 +274,83 @@ function custom_ai_image_description_settings_page_html() {
 
 // Register settings
 function custom_ai_image_description_register_settings() {
-    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_api_provider');
-    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_claude_api_key');
-    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_openrouter_api_key');
-    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_openai_api_key');
-    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_model');
-    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_prompt');
-    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_language');
-    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_max_tokens');
-    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_debug_mode');
+    // API Provider with validation
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_api_provider', [
+        'type' => 'string',
+        'sanitize_callback' => 'caidg_sanitize_provider',
+        'default' => 'claude'
+    ]);
+
+    // Claude API Key with encryption
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_claude_api_key', [
+        'type' => 'string',
+        'sanitize_callback' => function($value) {
+            if (empty($value)) {
+                return '';
+            }
+            // Encrypt the key before storing
+            return caidg_encrypt_api_key(sanitize_text_field($value));
+        }
+    ]);
+
+    // OpenRouter API Key with encryption
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_openrouter_api_key', [
+        'type' => 'string',
+        'sanitize_callback' => function($value) {
+            if (empty($value)) {
+                return '';
+            }
+            return caidg_encrypt_api_key(sanitize_text_field($value));
+        }
+    ]);
+
+    // OpenAI API Key with encryption
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_openai_api_key', [
+        'type' => 'string',
+        'sanitize_callback' => function($value) {
+            if (empty($value)) {
+                return '';
+            }
+            return caidg_encrypt_api_key(sanitize_text_field($value));
+        }
+    ]);
+
+    // Model with sanitization
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_model', [
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_text_field',
+        'default' => 'claude-3-5-sonnet-latest'
+    ]);
+
+    // Prompt with sanitization
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_prompt', [
+        'type' => 'string',
+        'sanitize_callback' => 'sanitize_textarea_field',
+        'default' => 'Generate a brief alt text description for this image:'
+    ]);
+
+    // Language with validation
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_language', [
+        'type' => 'string',
+        'sanitize_callback' => 'caidg_sanitize_language',
+        'default' => 'en'
+    ]);
+
+    // Max Tokens with range validation
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_max_tokens', [
+        'type' => 'integer',
+        'sanitize_callback' => 'caidg_sanitize_max_tokens',
+        'default' => 200
+    ]);
+
+    // Debug Mode
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_debug_mode', [
+        'type' => 'boolean',
+        'sanitize_callback' => function($value) {
+            return !empty($value) ? 1 : 0;
+        },
+        'default' => false
+    ]);
 
     add_settings_section('custom_ai_image_description_settings', 'API Settings', 'custom_ai_image_description_settings_section_callback', 'custom_ai_image_description_options');
     
@@ -79,6 +386,8 @@ function custom_ai_image_description_api_provider_callback() {
 
 function custom_ai_image_description_claude_api_key_callback() {
     $api_key = get_option('custom_ai_image_description_claude_api_key');
+    // Decrypt for display in form (will be re-encrypted on save)
+    $api_key = caidg_decrypt_api_key($api_key);
     $provider = get_option('custom_ai_image_description_api_provider', 'claude');
     $style = ($provider !== 'claude') ? 'display:none;' : '';
     echo '<div class="api-key-field" data-provider="claude" style="' . $style . '">';
@@ -89,6 +398,8 @@ function custom_ai_image_description_claude_api_key_callback() {
 
 function custom_ai_image_description_openrouter_api_key_callback() {
     $api_key = get_option('custom_ai_image_description_openrouter_api_key');
+    // Decrypt for display in form (will be re-encrypted on save)
+    $api_key = caidg_decrypt_api_key($api_key);
     $provider = get_option('custom_ai_image_description_api_provider', 'claude');
     $style = ($provider !== 'openrouter') ? 'display:none;' : '';
     echo '<div class="api-key-field" data-provider="openrouter" style="' . $style . '">';
@@ -99,6 +410,8 @@ function custom_ai_image_description_openrouter_api_key_callback() {
 
 function custom_ai_image_description_openai_api_key_callback() {
     $api_key = get_option('custom_ai_image_description_openai_api_key');
+    // Decrypt for display in form (will be re-encrypted on save)
+    $api_key = caidg_decrypt_api_key($api_key);
     $provider = get_option('custom_ai_image_description_api_provider', 'claude');
     $style = ($provider !== 'openai') ? 'display:none;' : '';
     echo '<div class="api-key-field" data-provider="openai" style="' . $style . '">';
@@ -531,6 +844,9 @@ function custom_ai_image_description_generate($image_url, $image_title = '') {
 // Generate alt text using Claude API
 function custom_ai_image_description_generate_claude($image_url, $image_title = '') {
     $api_key = get_option('custom_ai_image_description_claude_api_key');
+    // Decrypt API key
+    $api_key = caidg_decrypt_api_key($api_key);
+
     $model = get_option('custom_ai_image_description_model', 'claude-3-5-sonnet-latest');
     $prompt = get_option('custom_ai_image_description_prompt', 'Generate a brief alt text description for this image:');
     $language = get_option('custom_ai_image_description_language', 'en');
@@ -539,26 +855,32 @@ function custom_ai_image_description_generate_claude($image_url, $image_title = 
 
     if (empty($api_key)) {
         error_log('Custom AI Image Description Generator Error: Claude API key is missing');
-        return new WP_Error('missing_api_key', 'Claude API key is missing');
+        return new WP_Error(CAIDG_Error_Codes::MISSING_API_KEY, 'Claude API key is missing');
+    }
+
+    // SSRF Protection: Validate image URL is safe
+    $url_check = caidg_validate_image_url_safe($image_url);
+    if (is_wp_error($url_check)) {
+        return $url_check;
     }
 
     // Get image content
     $image_content = file_get_contents($image_url);
     if ($image_content === false) {
         error_log("Custom AI Image Description Generator Error: Failed to fetch image content from URL: $image_url");
-        return new WP_Error('image_fetch_error', 'Failed to fetch image content');
+        return new WP_Error(CAIDG_Error_Codes::IMAGE_FETCH_ERROR, 'Failed to fetch image content');
     }
-    
+
     // Detect actual image type
     $image_info = getimagesizefromstring($image_content);
     if ($image_info === false) {
         error_log("Custom AI Image Description Generator Error: Invalid image format for URL: $image_url");
-        return new WP_Error('invalid_image', 'Invalid image format');
+        return new WP_Error(CAIDG_Error_Codes::INVALID_IMAGE, 'Invalid image format');
     }
-    
+
     $mime_type = $image_info['mime'];
     $base64_image = base64_encode($image_content);
-    
+
     if ($debug_mode) {
         error_log("Image MIME type detected: " . $mime_type);
         error_log("Image size: " . strlen($image_content) . " bytes");
@@ -606,27 +928,28 @@ function custom_ai_image_description_generate_claude($image_url, $image_title = 
     if (is_wp_error($response)) {
         $error_message = $response->get_error_message();
         error_log("Custom AI Image Description Generator Error: Error connecting to Claude API: $error_message");
-        return new WP_Error('api_error', 'Error connecting to Claude API: ' . $error_message);
+        return new WP_Error(CAIDG_Error_Codes::NETWORK_ERROR, 'Error connecting to Claude API: ' . $error_message);
     }
 
     $response_code = wp_remote_retrieve_response_code($response);
     $response_body = wp_remote_retrieve_body($response);
     $body = json_decode($response_body, true);
-    
+
     if ($debug_mode) {
         error_log('Claude API Response Code: ' . $response_code);
         error_log('Claude API Response: ' . print_r($body, true));
     }
-    
+
     if ($response_code !== 200) {
+        $error_code = caidg_map_api_error($response_code, $body);
         $error_message = isset($body['error']['message']) ? $body['error']['message'] : wp_remote_retrieve_response_message($response);
         error_log("Custom AI Image Description Generator Error: Claude API returned status $response_code: $error_message");
-        
+
         if ($debug_mode) {
             error_log("Request body was: " . json_encode($request_body));
         }
-        
-        return new WP_Error('api_error', "Claude API error: $error_message");
+
+        return new WP_Error($error_code, "Claude API error: $error_message");
     }
 
     if (isset($body['content'][0]['text'])) {
@@ -634,12 +957,15 @@ function custom_ai_image_description_generate_claude($image_url, $image_title = 
     }
 
     error_log('Custom AI Image Description Generator Error: Invalid response structure from Claude API');
-    return new WP_Error('invalid_response', 'Invalid response from Claude API');
+    return new WP_Error(CAIDG_Error_Codes::INVALID_RESPONSE, 'Invalid response from Claude API');
 }
 
 // Generate alt text using OpenRouter API
 function custom_ai_image_description_generate_openrouter($image_url, $image_title = '') {
     $api_key = get_option('custom_ai_image_description_openrouter_api_key');
+    // Decrypt API key
+    $api_key = caidg_decrypt_api_key($api_key);
+
     $model = get_option('custom_ai_image_description_model', 'anthropic/claude-3.5-sonnet');
     $prompt = get_option('custom_ai_image_description_prompt', 'Generate a brief alt text description for this image:');
     $language = get_option('custom_ai_image_description_language', 'en');
@@ -648,14 +974,20 @@ function custom_ai_image_description_generate_openrouter($image_url, $image_titl
 
     if (empty($api_key)) {
         error_log('Custom AI Image Description Generator Error: OpenRouter API key is missing');
-        return new WP_Error('missing_api_key', 'OpenRouter API key is missing');
+        return new WP_Error(CAIDG_Error_Codes::MISSING_API_KEY, 'OpenRouter API key is missing');
+    }
+
+    // SSRF Protection: Validate image URL is safe
+    $url_check = caidg_validate_image_url_safe($image_url);
+    if (is_wp_error($url_check)) {
+        return $url_check;
     }
 
     // Get image content
     $image_content = file_get_contents($image_url);
     if ($image_content === false) {
         error_log("Custom AI Image Description Generator Error: Failed to fetch image content from URL: $image_url");
-        return new WP_Error('image_fetch_error', 'Failed to fetch image content');
+        return new WP_Error(CAIDG_Error_Codes::IMAGE_FETCH_ERROR, 'Failed to fetch image content');
     }
     
     // Detect actual image type
@@ -729,27 +1061,28 @@ function custom_ai_image_description_generate_openrouter($image_url, $image_titl
     if (is_wp_error($response)) {
         $error_message = $response->get_error_message();
         error_log("Custom AI Image Description Generator Error: Error connecting to OpenRouter API: $error_message");
-        return new WP_Error('api_error', 'Error connecting to OpenRouter API: ' . $error_message);
+        return new WP_Error(CAIDG_Error_Codes::NETWORK_ERROR, 'Error connecting to OpenRouter API: ' . $error_message);
     }
 
     $response_code = wp_remote_retrieve_response_code($response);
     $response_body = wp_remote_retrieve_body($response);
     $body = json_decode($response_body, true);
-    
+
     if ($debug_mode) {
         error_log('OpenRouter API Response Code: ' . $response_code);
         error_log('OpenRouter API Response: ' . print_r($body, true));
     }
-    
+
     if ($response_code !== 200) {
+        $error_code = caidg_map_api_error($response_code, $body);
         $error_message = isset($body['error']['message']) ? $body['error']['message'] : wp_remote_retrieve_response_message($response);
         error_log("Custom AI Image Description Generator Error: OpenRouter API returned status $response_code: $error_message");
-        
+
         if ($debug_mode) {
             error_log("Request body was: " . json_encode($request_body));
         }
-        
-        return new WP_Error('api_error', "OpenRouter API error: $error_message");
+
+        return new WP_Error($error_code, "OpenRouter API error: $error_message");
     }
 
     // OpenRouter returns OpenAI-compatible response format
@@ -758,12 +1091,15 @@ function custom_ai_image_description_generate_openrouter($image_url, $image_titl
     }
 
     error_log('Custom AI Image Description Generator Error: Invalid response structure from OpenRouter API');
-    return new WP_Error('invalid_response', 'Invalid response from OpenRouter API');
+    return new WP_Error(CAIDG_Error_Codes::INVALID_RESPONSE, 'Invalid response from OpenRouter API');
 }
 
 // Generate alt text using OpenAI API
 function custom_ai_image_description_generate_openai($image_url, $image_title = '') {
     $api_key = get_option('custom_ai_image_description_openai_api_key');
+    // Decrypt API key
+    $api_key = caidg_decrypt_api_key($api_key);
+
     $model = get_option('custom_ai_image_description_model', 'gpt-4o');
     $prompt = get_option('custom_ai_image_description_prompt', 'Generate a brief alt text description for this image:');
     $language = get_option('custom_ai_image_description_language', 'en');
@@ -772,14 +1108,20 @@ function custom_ai_image_description_generate_openai($image_url, $image_title = 
 
     if (empty($api_key)) {
         error_log('Custom AI Image Description Generator Error: OpenAI API key is missing');
-        return new WP_Error('missing_api_key', 'OpenAI API key is missing');
+        return new WP_Error(CAIDG_Error_Codes::MISSING_API_KEY, 'OpenAI API key is missing');
+    }
+
+    // SSRF Protection: Validate image URL is safe
+    $url_check = caidg_validate_image_url_safe($image_url);
+    if (is_wp_error($url_check)) {
+        return $url_check;
     }
 
     // Get image content
     $image_content = file_get_contents($image_url);
     if ($image_content === false) {
         error_log("Custom AI Image Description Generator Error: Failed to fetch image content from URL: $image_url");
-        return new WP_Error('image_fetch_error', 'Failed to fetch image content');
+        return new WP_Error(CAIDG_Error_Codes::IMAGE_FETCH_ERROR, 'Failed to fetch image content');
     }
     
     // Detect actual image type
@@ -850,27 +1192,28 @@ function custom_ai_image_description_generate_openai($image_url, $image_title = 
     if (is_wp_error($response)) {
         $error_message = $response->get_error_message();
         error_log("Custom AI Image Description Generator Error: Error connecting to OpenAI API: $error_message");
-        return new WP_Error('api_error', 'Error connecting to OpenAI API: ' . $error_message);
+        return new WP_Error(CAIDG_Error_Codes::NETWORK_ERROR, 'Error connecting to OpenAI API: ' . $error_message);
     }
 
     $response_code = wp_remote_retrieve_response_code($response);
     $response_body = wp_remote_retrieve_body($response);
     $body = json_decode($response_body, true);
-    
+
     if ($debug_mode) {
         error_log('OpenAI API Response Code: ' . $response_code);
         error_log('OpenAI API Response: ' . print_r($body, true));
     }
-    
+
     if ($response_code !== 200) {
+        $error_code = caidg_map_api_error($response_code, $body);
         $error_message = isset($body['error']['message']) ? $body['error']['message'] : wp_remote_retrieve_response_message($response);
         error_log("Custom AI Image Description Generator Error: OpenAI API returned status $response_code: $error_message");
-        
+
         if ($debug_mode) {
             error_log("Request body was: " . json_encode($request_body));
         }
-        
-        return new WP_Error('api_error', "OpenAI API error: $error_message");
+
+        return new WP_Error($error_code, "OpenAI API error: $error_message");
     }
 
     if (isset($body['choices'][0]['message']['content'])) {
@@ -878,7 +1221,7 @@ function custom_ai_image_description_generate_openai($image_url, $image_title = 
     }
 
     error_log('Custom AI Image Description Generator Error: Invalid response structure from OpenAI API');
-    return new WP_Error('invalid_response', 'Invalid response from OpenAI API');
+    return new WP_Error(CAIDG_Error_Codes::INVALID_RESPONSE, 'Invalid response from OpenAI API');
 }
 
 // Generate alt text with retry mechanism
@@ -888,16 +1231,17 @@ function custom_ai_image_description_generate_with_retry($image_url, $image_titl
         if (!is_wp_error($result)) {
             return $result;
         }
-        
-        // Don't retry on certain errors
+
+        // Don't retry on non-transient errors
         $error_code = $result->get_error_code();
-        if (in_array($error_code, ['missing_api_key', 'invalid_image', 'image_fetch_error'])) {
+        if (!caidg_should_retry_error($error_code)) {
+            error_log("CAIDG: Non-retryable error encountered: $error_code");
             return $result;
         }
-        
+
         if ($i < $max_retries - 1) {
-            error_log("Retry attempt " . ($i + 1) . " for image: $image_url");
-            sleep(2 * ($i + 1)); // Exponential backoff
+            error_log("CAIDG: Retry attempt " . ($i + 1) . " for image: $image_url (error: $error_code)");
+            sleep(2 * ($i + 1)); // Exponential backoff: 2s, 4s, 6s
         }
     }
     return $result;
@@ -1004,19 +1348,26 @@ function custom_ai_ajax_refresh_openrouter_models() {
         wp_send_json_error('Security check failed');
         return;
     }
-    
+
     // Check permissions
     if (!current_user_can('manage_options')) {
         wp_send_json_error('Insufficient permissions');
         return;
     }
-    
+
+    // Rate limiting: 5 requests per minute per user
+    $user_id = get_current_user_id();
+    if (!caidg_check_rate_limit($user_id, 'refresh_openrouter_models', 5, 60)) {
+        wp_send_json_error('Rate limit exceeded. Please wait before refreshing again.');
+        return;
+    }
+
     // Clear the cache
     delete_transient('custom_ai_openrouter_vision_models');
-    
+
     // Fetch fresh models
     $models = custom_ai_image_description_fetch_openrouter_models();
-    
+
     if ($models && count($models) > 0) {
         wp_send_json_success(array(
             'count' => count($models),
@@ -1034,19 +1385,26 @@ function custom_ai_ajax_refresh_openai_models() {
         wp_send_json_error('Security check failed');
         return;
     }
-    
+
     // Check permissions
     if (!current_user_can('manage_options')) {
         wp_send_json_error('Insufficient permissions');
         return;
     }
-    
+
+    // Rate limiting: 5 requests per minute per user
+    $user_id = get_current_user_id();
+    if (!caidg_check_rate_limit($user_id, 'refresh_openai_models', 5, 60)) {
+        wp_send_json_error('Rate limit exceeded. Please wait before refreshing again.');
+        return;
+    }
+
     // Clear the cache
     delete_transient('custom_ai_openai_vision_models');
-    
+
     // Fetch fresh models
     $models = custom_ai_image_description_fetch_openai_models();
-    
+
     if ($models && count($models) > 0) {
         wp_send_json_success(array(
             'count' => count($models),
@@ -1063,35 +1421,42 @@ function custom_ai_ajax_generate_alt_text() {
         wp_send_json_error('Security check failed');
         return;
     }
-    
+
     // Check permissions
     if (!current_user_can('upload_files')) {
         wp_send_json_error('Insufficient permissions');
         return;
     }
-    
+
+    // Rate limiting: 30 requests per minute per user (for bulk operations)
+    $user_id = get_current_user_id();
+    if (!caidg_check_rate_limit($user_id, 'generate_alt_text', 30, 60)) {
+        wp_send_json_error('Rate limit exceeded. Please slow down your requests.');
+        return;
+    }
+
     $attachment_id = intval($_POST['attachment_id']);
     if (!$attachment_id) {
         wp_send_json_error('Invalid attachment ID');
         return;
     }
-    
+
     $image_url = wp_get_attachment_url($attachment_id);
     if (!$image_url) {
         wp_send_json_error('Could not retrieve image URL');
         return;
     }
-    
+
     $image_title = get_the_title($attachment_id);
     $alt_text = custom_ai_image_description_generate_with_retry($image_url, $image_title);
-    
+
     if (is_wp_error($alt_text)) {
         wp_send_json_error($alt_text->get_error_message());
         return;
     }
-    
+
     update_post_meta($attachment_id, '_wp_attachment_image_alt', $alt_text);
-    
+
     wp_send_json_success([
         'alt_text' => $alt_text,
         'attachment_id' => $attachment_id
