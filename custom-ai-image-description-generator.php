@@ -108,8 +108,47 @@ function caidg_validate_api_key_format($key, $provider) {
 }
 
 /**
+ * Get image content safely from attachment
+ * Prefers local filesystem access, falls back to URL with SSRF protection
+ *
+ * @param int $attachment_id The attachment ID
+ * @return string|WP_Error Image content or error
+ */
+function caidg_get_image_content_safe($attachment_id) {
+    // Try local filesystem first (fast, no SSRF risk)
+    $file_path = get_attached_file($attachment_id);
+
+    if ($file_path && file_exists($file_path) && is_readable($file_path)) {
+        $image_content = file_get_contents($file_path);
+        if ($image_content !== false) {
+            return $image_content;
+        }
+    }
+
+    // Fallback to URL (for CDN, S3, remote storage)
+    $image_url = wp_get_attachment_url($attachment_id);
+    if (!$image_url) {
+        return new WP_Error(CAIDG_Error_Codes::IMAGE_FETCH_ERROR, 'Could not retrieve image URL or file path');
+    }
+
+    // SSRF Protection: Only for remote URLs
+    $url_check = caidg_validate_image_url_safe($image_url);
+    if (is_wp_error($url_check)) {
+        return $url_check;
+    }
+
+    $image_content = file_get_contents($image_url);
+    if ($image_content === false) {
+        return new WP_Error(CAIDG_Error_Codes::IMAGE_FETCH_ERROR, 'Failed to fetch image from URL');
+    }
+
+    return $image_content;
+}
+
+/**
  * Check if URL is safe from SSRF attacks
  * Prevents access to private IP ranges and localhost
+ * Note: Only used for remote/CDN storage, not local uploads
  *
  * @param string $url The URL to check
  * @return bool|WP_Error True if safe, WP_Error if blocked
@@ -829,20 +868,22 @@ function custom_ai_image_description_debug_mode_callback() {
 }
 
 // Generate alt text using selected API provider
-function custom_ai_image_description_generate($image_url, $image_title = '') {
+// Accepts either attachment ID (preferred) or image URL (legacy)
+function custom_ai_image_description_generate($image_source, $image_title = '', $attachment_id = null) {
     $provider = get_option('custom_ai_image_description_api_provider', 'claude');
-    
+
     if ($provider === 'openrouter') {
-        return custom_ai_image_description_generate_openrouter($image_url, $image_title);
+        return custom_ai_image_description_generate_openrouter($image_source, $image_title, $attachment_id);
     } elseif ($provider === 'openai') {
-        return custom_ai_image_description_generate_openai($image_url, $image_title);
+        return custom_ai_image_description_generate_openai($image_source, $image_title, $attachment_id);
     } else {
-        return custom_ai_image_description_generate_claude($image_url, $image_title);
+        return custom_ai_image_description_generate_claude($image_source, $image_title, $attachment_id);
     }
 }
 
 // Generate alt text using Claude API
-function custom_ai_image_description_generate_claude($image_url, $image_title = '') {
+// Accepts either attachment ID (preferred) or image URL (legacy)
+function custom_ai_image_description_generate_claude($image_source, $image_title = '', $attachment_id = null) {
     $api_key = get_option('custom_ai_image_description_claude_api_key');
     // Decrypt API key
     $api_key = caidg_decrypt_api_key($api_key);
@@ -858,16 +899,25 @@ function custom_ai_image_description_generate_claude($image_url, $image_title = 
         return new WP_Error(CAIDG_Error_Codes::MISSING_API_KEY, 'Claude API key is missing');
     }
 
-    // SSRF Protection: Validate image URL is safe
-    $url_check = caidg_validate_image_url_safe($image_url);
-    if (is_wp_error($url_check)) {
-        return $url_check;
+    // Get image content safely (prefers filesystem, falls back to URL)
+    if ($attachment_id !== null) {
+        // New method: Use attachment ID (fast, secure)
+        $image_content = caidg_get_image_content_safe($attachment_id);
+    } else {
+        // Legacy method: Use URL (for backward compatibility)
+        $url_check = caidg_validate_image_url_safe($image_source);
+        if (is_wp_error($url_check)) {
+            return $url_check;
+        }
+        $image_content = file_get_contents($image_source);
     }
 
-    // Get image content
-    $image_content = file_get_contents($image_url);
+    if (is_wp_error($image_content)) {
+        return $image_content;
+    }
+
     if ($image_content === false) {
-        error_log("Custom AI Image Description Generator Error: Failed to fetch image content from URL: $image_url");
+        error_log("Custom AI Image Description Generator Error: Failed to fetch image content");
         return new WP_Error(CAIDG_Error_Codes::IMAGE_FETCH_ERROR, 'Failed to fetch image content');
     }
 
@@ -961,7 +1011,8 @@ function custom_ai_image_description_generate_claude($image_url, $image_title = 
 }
 
 // Generate alt text using OpenRouter API
-function custom_ai_image_description_generate_openrouter($image_url, $image_title = '') {
+// Accepts either attachment ID (preferred) or image URL (legacy)
+function custom_ai_image_description_generate_openrouter($image_source, $image_title = '', $attachment_id = null) {
     $api_key = get_option('custom_ai_image_description_openrouter_api_key');
     // Decrypt API key
     $api_key = caidg_decrypt_api_key($api_key);
@@ -977,16 +1028,25 @@ function custom_ai_image_description_generate_openrouter($image_url, $image_titl
         return new WP_Error(CAIDG_Error_Codes::MISSING_API_KEY, 'OpenRouter API key is missing');
     }
 
-    // SSRF Protection: Validate image URL is safe
-    $url_check = caidg_validate_image_url_safe($image_url);
-    if (is_wp_error($url_check)) {
-        return $url_check;
+    // Get image content safely (prefers filesystem, falls back to URL)
+    if ($attachment_id !== null) {
+        // New method: Use attachment ID (fast, secure)
+        $image_content = caidg_get_image_content_safe($attachment_id);
+    } else {
+        // Legacy method: Use URL (for backward compatibility)
+        $url_check = caidg_validate_image_url_safe($image_source);
+        if (is_wp_error($url_check)) {
+            return $url_check;
+        }
+        $image_content = file_get_contents($image_source);
     }
 
-    // Get image content
-    $image_content = file_get_contents($image_url);
+    if (is_wp_error($image_content)) {
+        return $image_content;
+    }
+
     if ($image_content === false) {
-        error_log("Custom AI Image Description Generator Error: Failed to fetch image content from URL: $image_url");
+        error_log("Custom AI Image Description Generator Error: Failed to fetch image content");
         return new WP_Error(CAIDG_Error_Codes::IMAGE_FETCH_ERROR, 'Failed to fetch image content');
     }
     
@@ -1095,7 +1155,8 @@ function custom_ai_image_description_generate_openrouter($image_url, $image_titl
 }
 
 // Generate alt text using OpenAI API
-function custom_ai_image_description_generate_openai($image_url, $image_title = '') {
+// Accepts either attachment ID (preferred) or image URL (legacy)
+function custom_ai_image_description_generate_openai($image_source, $image_title = '', $attachment_id = null) {
     $api_key = get_option('custom_ai_image_description_openai_api_key');
     // Decrypt API key
     $api_key = caidg_decrypt_api_key($api_key);
@@ -1111,16 +1172,25 @@ function custom_ai_image_description_generate_openai($image_url, $image_title = 
         return new WP_Error(CAIDG_Error_Codes::MISSING_API_KEY, 'OpenAI API key is missing');
     }
 
-    // SSRF Protection: Validate image URL is safe
-    $url_check = caidg_validate_image_url_safe($image_url);
-    if (is_wp_error($url_check)) {
-        return $url_check;
+    // Get image content safely (prefers filesystem, falls back to URL)
+    if ($attachment_id !== null) {
+        // New method: Use attachment ID (fast, secure)
+        $image_content = caidg_get_image_content_safe($attachment_id);
+    } else {
+        // Legacy method: Use URL (for backward compatibility)
+        $url_check = caidg_validate_image_url_safe($image_source);
+        if (is_wp_error($url_check)) {
+            return $url_check;
+        }
+        $image_content = file_get_contents($image_source);
     }
 
-    // Get image content
-    $image_content = file_get_contents($image_url);
+    if (is_wp_error($image_content)) {
+        return $image_content;
+    }
+
     if ($image_content === false) {
-        error_log("Custom AI Image Description Generator Error: Failed to fetch image content from URL: $image_url");
+        error_log("Custom AI Image Description Generator Error: Failed to fetch image content");
         return new WP_Error(CAIDG_Error_Codes::IMAGE_FETCH_ERROR, 'Failed to fetch image content');
     }
     
@@ -1225,9 +1295,10 @@ function custom_ai_image_description_generate_openai($image_url, $image_title = 
 }
 
 // Generate alt text with retry mechanism
-function custom_ai_image_description_generate_with_retry($image_url, $image_title = '', $max_retries = 3) {
+// Accepts either attachment ID (preferred) or image URL (legacy)
+function custom_ai_image_description_generate_with_retry($image_source, $image_title = '', $max_retries = 3, $attachment_id = null) {
     for ($i = 0; $i < $max_retries; $i++) {
-        $result = custom_ai_image_description_generate($image_url, $image_title);
+        $result = custom_ai_image_description_generate($image_source, $image_title, $attachment_id);
         if (!is_wp_error($result)) {
             return $result;
         }
@@ -1240,7 +1311,8 @@ function custom_ai_image_description_generate_with_retry($image_url, $image_titl
         }
 
         if ($i < $max_retries - 1) {
-            error_log("CAIDG: Retry attempt " . ($i + 1) . " for image: $image_url (error: $error_code)");
+            $source_info = $attachment_id ? "attachment ID: $attachment_id" : "image: $image_source";
+            error_log("CAIDG: Retry attempt " . ($i + 1) . " for $source_info (error: $error_code)");
             sleep(2 * ($i + 1)); // Exponential backoff: 2s, 4s, 6s
         }
     }
@@ -1253,9 +1325,9 @@ function custom_ai_image_description_add_on_upload($metadata, $attachment_id) {
         return $metadata;
     }
 
-    $image_url = wp_get_attachment_url($attachment_id);
     $image_title = get_the_title($attachment_id);
-    $alt_text = custom_ai_image_description_generate_with_retry($image_url, $image_title);
+    // Use attachment ID directly (fast, secure, works on localhost)
+    $alt_text = custom_ai_image_description_generate_with_retry(null, $image_title, 3, $attachment_id);
 
     if (!is_wp_error($alt_text)) {
         update_post_meta($attachment_id, '_wp_attachment_image_alt', $alt_text);
@@ -1282,16 +1354,11 @@ function custom_ai_image_description_handle_bulk_action($redirect_to, $doaction,
 
     $success_count = 0;
     $error_count = 0;
-    
+
     foreach ($post_ids as $post_id) {
-        $image_url = wp_get_attachment_url($post_id);
-        if (!$image_url) {
-            $error_count++;
-            continue;
-        }
-        
         $image_title = get_the_title($post_id);
-        $alt_text = custom_ai_image_description_generate_with_retry($image_url, $image_title);
+        // Use attachment ID directly (fast, secure, works on localhost)
+        $alt_text = custom_ai_image_description_generate_with_retry(null, $image_title, 3, $post_id);
 
         if (!is_wp_error($alt_text)) {
             update_post_meta($post_id, '_wp_attachment_image_alt', $alt_text);
@@ -1306,7 +1373,7 @@ function custom_ai_image_description_handle_bulk_action($redirect_to, $doaction,
         'generated_custom_ai_description' => $success_count,
         'generation_errors' => $error_count
     ], $redirect_to);
-    
+
     return $redirect_to;
 }
 add_filter('handle_bulk_actions-upload', 'custom_ai_image_description_handle_bulk_action', 10, 3);
@@ -1441,14 +1508,9 @@ function custom_ai_ajax_generate_alt_text() {
         return;
     }
 
-    $image_url = wp_get_attachment_url($attachment_id);
-    if (!$image_url) {
-        wp_send_json_error('Could not retrieve image URL');
-        return;
-    }
-
     $image_title = get_the_title($attachment_id);
-    $alt_text = custom_ai_image_description_generate_with_retry($image_url, $image_title);
+    // Use attachment ID directly (fast, secure, works on localhost)
+    $alt_text = custom_ai_image_description_generate_with_retry(null, $image_title, 3, $attachment_id);
 
     if (is_wp_error($alt_text)) {
         wp_send_json_error($alt_text->get_error_message());
