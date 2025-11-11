@@ -2,7 +2,7 @@
 /*
 Plugin Name: Custom AI Image Description Generator
 Description: Automatically generates alt text for images using Claude API, OpenAI API, or OpenRouter (90+ vision models with automatic discovery)
-Version: 2.6
+Version: 2.7
 Author: Your Name
 */
 
@@ -275,6 +275,280 @@ function caidg_sanitize_language($value) {
     $value = preg_replace('/[^a-z0-9\-]/i', '', $value);
     return substr($value, 0, 10);
 }
+
+// ============================================================================
+// PHASE 2 IMPROVEMENTS: Performance & Optimization Functions
+// ============================================================================
+
+/**
+ * Get cache key for alt text based on image hash and settings
+ *
+ * @param int $attachment_id The attachment ID
+ * @return string|false Cache key or false on error
+ */
+function caidg_get_cache_key($attachment_id) {
+    $file_path = get_attached_file($attachment_id);
+    if (!$file_path || !file_exists($file_path)) {
+        return false;
+    }
+
+    // Create hash based on file content and current settings
+    $file_hash = md5_file($file_path);
+    $provider = get_option('custom_ai_image_description_api_provider', 'claude');
+    $model = '';
+
+    if ($provider === 'openrouter') {
+        $model = get_option('custom_ai_image_description_openrouter_model', '');
+    } elseif ($provider === 'openai') {
+        $model = get_option('custom_ai_image_description_openai_model', '');
+    } else {
+        $model = get_option('custom_ai_image_description_claude_model', 'claude-3-5-sonnet-20241022');
+    }
+
+    $language = get_option('custom_ai_image_description_language', 'en');
+
+    // Cache key includes file hash + provider + model + language
+    return "caidg_alt_{$file_hash}_{$provider}_{$model}_{$language}";
+}
+
+/**
+ * Get cached alt text if available
+ *
+ * @param int $attachment_id The attachment ID
+ * @return string|false Cached alt text or false if not found/expired
+ */
+function caidg_get_cached_alt_text($attachment_id) {
+    $cache_key = caidg_get_cache_key($attachment_id);
+    if (!$cache_key) {
+        return false;
+    }
+
+    return get_transient($cache_key);
+}
+
+/**
+ * Cache generated alt text
+ * Cache duration: 7 days (can be regenerated if settings change)
+ *
+ * @param int $attachment_id The attachment ID
+ * @param string $alt_text The generated alt text
+ * @return bool True if cached successfully
+ */
+function caidg_cache_alt_text($attachment_id, $alt_text) {
+    $cache_key = caidg_get_cache_key($attachment_id);
+    if (!$cache_key || empty($alt_text)) {
+        return false;
+    }
+
+    // Cache for 7 days (604800 seconds)
+    return set_transient($cache_key, $alt_text, 7 * DAY_IN_SECONDS);
+}
+
+/**
+ * Clear alt text cache for specific attachment
+ *
+ * @param int $attachment_id The attachment ID
+ * @return bool True if deleted
+ */
+function caidg_clear_alt_text_cache($attachment_id) {
+    $cache_key = caidg_get_cache_key($attachment_id);
+    if (!$cache_key) {
+        return false;
+    }
+
+    return delete_transient($cache_key);
+}
+
+/**
+ * Record performance metrics for generation
+ *
+ * @param int $attachment_id The attachment ID
+ * @param float $duration Generation duration in seconds
+ * @param bool $success Whether generation succeeded
+ * @param string $provider The API provider used
+ */
+function caidg_record_metrics($attachment_id, $duration, $success, $provider) {
+    $metrics_key = 'caidg_metrics_' . date('Y-m-d');
+    $metrics = get_transient($metrics_key);
+
+    if ($metrics === false) {
+        $metrics = [
+            'total' => 0,
+            'success' => 0,
+            'failed' => 0,
+            'total_duration' => 0,
+            'by_provider' => []
+        ];
+    }
+
+    $metrics['total']++;
+    $metrics['total_duration'] += $duration;
+
+    if ($success) {
+        $metrics['success']++;
+    } else {
+        $metrics['failed']++;
+    }
+
+    if (!isset($metrics['by_provider'][$provider])) {
+        $metrics['by_provider'][$provider] = [
+            'count' => 0,
+            'duration' => 0
+        ];
+    }
+
+    $metrics['by_provider'][$provider]['count']++;
+    $metrics['by_provider'][$provider]['duration'] += $duration;
+
+    // Store metrics for 30 days
+    set_transient($metrics_key, $metrics, 30 * DAY_IN_SECONDS);
+}
+
+/**
+ * Get performance metrics for a specific date
+ *
+ * @param string $date Date in Y-m-d format (default: today)
+ * @return array|false Metrics array or false if not found
+ */
+function caidg_get_metrics($date = null) {
+    if ($date === null) {
+        $date = date('Y-m-d');
+    }
+
+    $metrics_key = 'caidg_metrics_' . $date;
+    return get_transient($metrics_key);
+}
+
+/**
+ * Schedule background batch processing
+ * For large batches (>10 images), process in background to avoid timeouts
+ *
+ * @param array $attachment_ids Array of attachment IDs to process
+ * @return bool True if scheduled successfully
+ */
+function caidg_schedule_batch_processing($attachment_ids) {
+    if (empty($attachment_ids)) {
+        return false;
+    }
+
+    // Store batch in option for processing
+    $batch_id = 'caidg_batch_' . time() . '_' . wp_rand(1000, 9999);
+    update_option($batch_id, [
+        'ids' => $attachment_ids,
+        'processed' => 0,
+        'total' => count($attachment_ids),
+        'success' => 0,
+        'failed' => 0,
+        'started' => current_time('mysql'),
+        'status' => 'pending'
+    ], false);
+
+    // Schedule immediate processing if not already scheduled
+    if (!wp_next_scheduled('caidg_process_batch', [$batch_id])) {
+        wp_schedule_single_event(time(), 'caidg_process_batch', [$batch_id]);
+    }
+
+    return $batch_id;
+}
+
+/**
+ * Process a batch of images in background
+ *
+ * @param string $batch_id The batch identifier
+ */
+function caidg_process_batch_background($batch_id) {
+    $batch = get_option($batch_id);
+    if (!$batch || $batch['status'] === 'completed') {
+        return;
+    }
+
+    // Update status to processing
+    $batch['status'] = 'processing';
+    update_option($batch_id, $batch, false);
+
+    // Process up to 5 images per cron run to avoid timeouts
+    $batch_size = 5;
+    $start_index = $batch['processed'];
+    $end_index = min($start_index + $batch_size, $batch['total']);
+
+    for ($i = $start_index; $i < $end_index; $i++) {
+        $attachment_id = $batch['ids'][$i];
+        $image_title = get_the_title($attachment_id);
+
+        $start_time = microtime(true);
+        $alt_text = custom_ai_image_description_generate_with_retry(null, $image_title, 3, $attachment_id);
+        $duration = microtime(true) - $start_time;
+
+        if (!is_wp_error($alt_text)) {
+            update_post_meta($attachment_id, '_wp_attachment_image_alt', $alt_text);
+            $batch['success']++;
+
+            $provider = get_option('custom_ai_image_description_api_provider', 'claude');
+            caidg_record_metrics($attachment_id, $duration, true, $provider);
+        } else {
+            $batch['failed']++;
+            error_log('CAIDG Batch: Error for attachment ' . $attachment_id . ': ' . $alt_text->get_error_message());
+
+            $provider = get_option('custom_ai_image_description_api_provider', 'claude');
+            caidg_record_metrics($attachment_id, $duration, false, $provider);
+        }
+
+        $batch['processed']++;
+    }
+
+    // Update batch status
+    if ($batch['processed'] >= $batch['total']) {
+        $batch['status'] = 'completed';
+        $batch['completed'] = current_time('mysql');
+    }
+
+    update_option($batch_id, $batch, false);
+
+    // Schedule next batch if not completed
+    if ($batch['status'] !== 'completed') {
+        wp_schedule_single_event(time() + 10, 'caidg_process_batch', [$batch_id]);
+    }
+}
+add_action('caidg_process_batch', 'caidg_process_batch_background');
+
+/**
+ * Get batch processing status
+ *
+ * @param string $batch_id The batch identifier
+ * @return array|false Batch status or false if not found
+ */
+function caidg_get_batch_status($batch_id) {
+    return get_option($batch_id, false);
+}
+
+/**
+ * Clean up old completed batches (older than 7 days)
+ */
+function caidg_cleanup_old_batches() {
+    global $wpdb;
+
+    $cutoff_time = time() - (7 * DAY_IN_SECONDS);
+
+    $batches = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT option_name FROM {$wpdb->options}
+            WHERE option_name LIKE %s
+            AND option_name < %s",
+            'caidg_batch_%',
+            'caidg_batch_' . $cutoff_time
+        )
+    );
+
+    foreach ($batches as $batch) {
+        delete_option($batch->option_name);
+    }
+}
+
+// Schedule weekly cleanup
+if (!wp_next_scheduled('caidg_cleanup_batches')) {
+    wp_schedule_event(time(), 'weekly', 'caidg_cleanup_batches');
+}
+add_action('caidg_cleanup_batches', 'caidg_cleanup_old_batches');
 
 /**
  * Sanitize and validate API provider
@@ -1296,10 +1570,32 @@ function custom_ai_image_description_generate_openai($image_source, $image_title
 
 // Generate alt text with retry mechanism
 // Accepts either attachment ID (preferred) or image URL (legacy)
+// Includes caching and performance metrics tracking
 function custom_ai_image_description_generate_with_retry($image_source, $image_title = '', $max_retries = 3, $attachment_id = null) {
+    // Check cache first if we have an attachment ID
+    if ($attachment_id !== null) {
+        $cached = caidg_get_cached_alt_text($attachment_id);
+        if ($cached !== false) {
+            error_log("CAIDG: Using cached alt text for attachment ID: $attachment_id");
+            return $cached;
+        }
+    }
+
+    $start_time = microtime(true);
+    $provider = get_option('custom_ai_image_description_api_provider', 'claude');
+
     for ($i = 0; $i < $max_retries; $i++) {
         $result = custom_ai_image_description_generate($image_source, $image_title, $attachment_id);
         if (!is_wp_error($result)) {
+            // Cache the result if we have an attachment ID
+            if ($attachment_id !== null) {
+                caidg_cache_alt_text($attachment_id, $result);
+            }
+
+            // Record success metrics
+            $duration = microtime(true) - $start_time;
+            caidg_record_metrics($attachment_id ?? 0, $duration, true, $provider);
+
             return $result;
         }
 
@@ -1307,6 +1603,11 @@ function custom_ai_image_description_generate_with_retry($image_source, $image_t
         $error_code = $result->get_error_code();
         if (!caidg_should_retry_error($error_code)) {
             error_log("CAIDG: Non-retryable error encountered: $error_code");
+
+            // Record failure metrics
+            $duration = microtime(true) - $start_time;
+            caidg_record_metrics($attachment_id ?? 0, $duration, false, $provider);
+
             return $result;
         }
 
@@ -1316,6 +1617,11 @@ function custom_ai_image_description_generate_with_retry($image_source, $image_t
             sleep(2 * ($i + 1)); // Exponential backoff: 2s, 4s, 6s
         }
     }
+
+    // Record failure metrics
+    $duration = microtime(true) - $start_time;
+    caidg_record_metrics($attachment_id ?? 0, $duration, false, $provider);
+
     return $result;
 }
 
@@ -1347,11 +1653,33 @@ function custom_ai_image_description_bulk_action($bulk_actions) {
 add_filter('bulk_actions-upload', 'custom_ai_image_description_bulk_action');
 
 // Handle bulk action
+// Uses background processing for large batches (>10 images) to avoid timeouts
 function custom_ai_image_description_handle_bulk_action($redirect_to, $doaction, $post_ids) {
     if ($doaction !== 'generate_custom_ai_description') {
         return $redirect_to;
     }
 
+    $batch_size = count($post_ids);
+
+    // For large batches (>10 images), use background processing
+    if ($batch_size > 10) {
+        $batch_id = caidg_schedule_batch_processing($post_ids);
+
+        if ($batch_id) {
+            $redirect_to = add_query_arg([
+                'caidg_batch_scheduled' => $batch_size,
+                'caidg_batch_id' => $batch_id
+            ], $redirect_to);
+        } else {
+            $redirect_to = add_query_arg([
+                'caidg_batch_error' => 1
+            ], $redirect_to);
+        }
+
+        return $redirect_to;
+    }
+
+    // For small batches (≤10 images), process synchronously for immediate results
     $success_count = 0;
     $error_count = 0;
 
@@ -1380,10 +1708,39 @@ add_filter('handle_bulk_actions-upload', 'custom_ai_image_description_handle_bul
 
 // Display admin notice after bulk action
 function custom_ai_image_description_bulk_action_admin_notice() {
+    // Handle batch processing scheduled notice
+    if (!empty($_REQUEST['caidg_batch_scheduled'])) {
+        $count = intval($_REQUEST['caidg_batch_scheduled']);
+        $batch_id = sanitize_text_field($_REQUEST['caidg_batch_id'] ?? '');
+
+        $message = sprintf(
+            _n(
+                'Scheduled background processing for %s image. Processing will complete in a few minutes.',
+                'Scheduled background processing for %s images. Processing will complete in a few minutes.',
+                $count,
+                'custom-ai-image-description-generator'
+            ),
+            $count
+        );
+
+        if ($batch_id) {
+            $message .= sprintf(' <a href="#" onclick="caidgCheckBatchStatus(\'%s\'); return false;">Check status</a>', esc_js($batch_id));
+        }
+
+        printf('<div id="message" class="updated notice is-dismissible"><p>%s</p></div>', $message);
+    }
+
+    // Handle batch error notice
+    if (!empty($_REQUEST['caidg_batch_error'])) {
+        printf('<div class="error notice is-dismissible"><p>%s</p></div>',
+            'Failed to schedule batch processing. Please try again with fewer images.');
+    }
+
+    // Handle immediate processing results
     if (!empty($_REQUEST['generated_custom_ai_description'])) {
         $count = intval($_REQUEST['generated_custom_ai_description']);
         $errors = intval($_REQUEST['generation_errors'] ?? 0);
-        
+
         $message = sprintf(
             _n(
                 'Generated AI alt text for %s image.',
@@ -1393,11 +1750,11 @@ function custom_ai_image_description_bulk_action_admin_notice() {
             ),
             $count
         );
-        
+
         if ($errors > 0) {
             $message .= sprintf(' %d errors occurred.', $errors);
         }
-        
+
         printf('<div id="message" class="updated notice is-dismissible"><p>%s</p></div>', $message);
     }
 }
@@ -1407,6 +1764,7 @@ add_action('admin_notices', 'custom_ai_image_description_bulk_action_admin_notic
 add_action('wp_ajax_caidg_generate_alt_text', 'custom_ai_ajax_generate_alt_text');
 add_action('wp_ajax_caidg_refresh_openrouter_models', 'custom_ai_ajax_refresh_openrouter_models');
 add_action('wp_ajax_caidg_refresh_openai_models', 'custom_ai_ajax_refresh_openai_models');
+add_action('wp_ajax_caidg_check_batch_status', 'custom_ai_ajax_check_batch_status');
 
 // AJAX handler for refreshing OpenRouter models
 function custom_ai_ajax_refresh_openrouter_models() {
@@ -1522,6 +1880,46 @@ function custom_ai_ajax_generate_alt_text() {
     wp_send_json_success([
         'alt_text' => $alt_text,
         'attachment_id' => $attachment_id
+    ]);
+}
+
+// AJAX handler for checking batch processing status
+function custom_ai_ajax_check_batch_status() {
+    // Verify nonce
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'caidg_ajax_nonce')) {
+        wp_send_json_error('Security check failed');
+        return;
+    }
+
+    // Check permissions
+    if (!current_user_can('upload_files')) {
+        wp_send_json_error('Insufficient permissions');
+        return;
+    }
+
+    $batch_id = sanitize_text_field($_POST['batch_id'] ?? '');
+    if (empty($batch_id) || !preg_match('/^caidg_batch_\d+_\d+$/', $batch_id)) {
+        wp_send_json_error('Invalid batch ID');
+        return;
+    }
+
+    $status = caidg_get_batch_status($batch_id);
+    if (!$status) {
+        wp_send_json_error('Batch not found');
+        return;
+    }
+
+    $progress_percent = $status['total'] > 0 ? round(($status['processed'] / $status['total']) * 100) : 0;
+
+    wp_send_json_success([
+        'status' => $status['status'],
+        'processed' => $status['processed'],
+        'total' => $status['total'],
+        'success' => $status['success'],
+        'failed' => $status['failed'],
+        'progress_percent' => $progress_percent,
+        'started' => $status['started'],
+        'completed' => $status['completed'] ?? null
     ]);
 }
 
