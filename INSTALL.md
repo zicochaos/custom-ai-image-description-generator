@@ -3,7 +3,9 @@
 ## Quick Start (5 minutes)
 
 ### Step 1: Download the Plugin
+
 Download all files from this repository:
+
 - `custom-ai-image-description-generator.php` (main plugin file)
 - `diagnostic.php` (optional troubleshooting tool)
 - `test-generation.php` (optional testing tool)
@@ -11,6 +13,7 @@ Download all files from this repository:
 ### Step 2: Upload to WordPress
 
 #### Method A: Via WordPress Admin (Recommended)
+
 1. Zip all plugin files into `custom-ai-image-description-generator.zip`
 2. Go to **WordPress Admin → Plugins → Add New**
 3. Click **Upload Plugin**
@@ -19,6 +22,7 @@ Download all files from this repository:
 6. Click **Activate**
 
 #### Method B: Via FTP/File Manager
+
 1. Connect to your server via FTP or file manager
 2. Navigate to `/wp-content/plugins/`
 3. Create folder `custom-ai-image-description-generator`
@@ -27,6 +31,7 @@ Download all files from this repository:
 6. Find the plugin and click **Activate**
 
 ### Step 3: Get Your API Key
+
 1. Visit [console.anthropic.com](https://console.anthropic.com/)
 2. Sign up or log in
 3. Go to **API Keys** section
@@ -35,12 +40,14 @@ Download all files from this repository:
 6. Save it somewhere safe (you won't see it again!)
 
 ### Step 4: Configure the Plugin
+
 1. Go to **Settings → Custom AI Image Description**
 2. Paste your API key
 3. Select **Claude 3.5 Sonnet** (recommended)
 4. Click **Save Settings**
 
 ### Step 5: Test It Works
+
 1. Go to **Media Library**
 2. Upload a test image
 3. Check if alt text was generated
@@ -77,6 +84,7 @@ After installation, your plugin folder should look like this:
 ### Permissions
 
 Ensure proper file permissions:
+
 - Files: 644 (`-rw-r--r--`)
 - Folders: 755 (`drwxr-xr-x`)
 
@@ -91,28 +99,31 @@ chmod 755 ../custom-ai-image-description-generator/
 
 ### Basic Settings
 
-| Setting | Recommended Value | Notes |
-|---------|------------------|-------|
-| API Key | Your key | Keep it secret! |
-| Model | claude-3-5-sonnet-20241022 | Best balance |
-| Language | en | Your content language |
-| Max Tokens | 200 | Good for alt text |
+| Setting    | Recommended Value          | Notes                 |
+| ---------- | -------------------------- | --------------------- |
+| API Key    | Your key                   | Keep it secret!       |
+| Model      | claude-3-5-sonnet-20241022 | Best balance          |
+| Language   | en                         | Your content language |
+| Max Tokens | 200                        | Good for alt text     |
 
 ### Advanced Configuration
 
 #### Custom Prompt Examples
 
 For e-commerce sites:
+
 ```
 Generate SEO-friendly alt text focusing on product features, color, and style:
 ```
 
 For news sites:
+
 ```
 Create descriptive alt text emphasizing people, actions, and context:
 ```
 
 For art galleries:
+
 ```
 Describe the artwork's style, medium, subject, and mood:
 ```
@@ -120,6 +131,7 @@ Describe the artwork's style, medium, subject, and mood:
 #### Language Codes
 
 Common language codes for multi-language sites:
+
 - `en` - English
 - `es` - Spanish
 - `fr` - French
@@ -136,6 +148,7 @@ Common language codes for multi-language sites:
 **Error: "Plugin could not be activated because it triggered a fatal error"**
 
 1. Check PHP version (need 7.4+):
+
    ```php
    <?php phpinfo(); ?>
    ```
@@ -171,22 +184,24 @@ Common language codes for multi-language sites:
 ### Using the Diagnostic Tool
 
 1. Navigate to:
+
    ```
    yoursite.com/wp-content/plugins/custom-ai-image-description-generator/diagnostic.php
    ```
 
 2. Check all green checkmarks:
-   - ✅ API Key configured
-   - ✅ Valid model selected
-   - ✅ PHP version compatible
+   - [OK] API Key configured
+   - [OK] Valid model selected
+   - [OK] PHP version compatible
 
 3. Click **Test API Connection**
 
-4. Should see: "✅ API connection successful!"
+4. Should see: "[OK] API connection successful!"
 
 ### Using the Test Generation Tool
 
 1. Navigate to:
+
    ```
    yoursite.com/wp-content/plugins/custom-ai-image-description-generator/test-generation.php
    ```
@@ -201,7 +216,7 @@ Common language codes for multi-language sites:
 
 ### Manual Update Process
 
-1. **Backup first!** 
+1. **Backup first!**
    - Export your settings
    - Note your API key
 
@@ -218,12 +233,14 @@ Common language codes for multi-language sites:
 ### Preserving Settings
 
 Settings are stored in WordPress database and survive updates:
+
 - Table: `wp_options`
 - Keys: `custom_ai_image_description_*`
 
 To backup settings:
+
 ```sql
-SELECT * FROM wp_options 
+SELECT * FROM wp_options
 WHERE option_name LIKE 'custom_ai_image_description_%';
 ```
 
@@ -236,14 +253,15 @@ WHERE option_name LIKE 'custom_ai_image_description_%';
 3. Remove settings from database (optional):
 
 ```sql
-DELETE FROM wp_options 
+DELETE FROM wp_options
 WHERE option_name LIKE 'custom_ai_image_description_%';
 ```
 
 4. Remove generated alt text (optional):
+
 ```sql
 -- This removes ALL alt text, be careful!
-DELETE FROM wp_postmeta 
+DELETE FROM wp_postmeta
 WHERE meta_key = '_wp_attachment_image_alt';
 ```
 
@@ -259,11 +277,12 @@ WHERE meta_key = '_wp_attachment_image_alt';
 ### Common Success Indicators
 
 You'll know it's working when:
-- ✅ Settings page appears under Settings menu
-- ✅ "Generate AI Alt Text" appears in Media Library bulk actions
-- ✅ New uploads automatically get alt text
-- ✅ Diagnostic tool shows all green
-- ✅ No errors in debug log
+
+- [OK] Settings page appears under Settings menu
+- [OK] "Generate AI Alt Text" appears in Media Library bulk actions
+- [OK] New uploads automatically get alt text
+- [OK] Diagnostic tool shows all green
+- [OK] No errors in debug log
 
 ### Still Having Issues?
 

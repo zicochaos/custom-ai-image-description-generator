@@ -2,7 +2,7 @@
 /*
 Plugin Name: Custom AI Image Description Generator
 Description: Automatically generates alt text for images using Claude API, OpenAI API, or OpenRouter (90+ vision models with automatic discovery)
-Version: 2.5
+Version: 2.6
 Author: Your Name
 */
 
@@ -209,6 +209,143 @@ function custom_ai_image_description_get_fallback_openrouter_models() {
     );
 }
 
+// Fetch models from Anthropic API
+// API Reference: https://platform.claude.com/docs/en/about-claude/pricing#model-pricing
+// List models: curl https://api.anthropic.com/v1/models -H 'anthropic-version: 2023-06-01' -H "X-Api-Key: $ANTHROPIC_API_KEY"
+function custom_ai_image_description_fetch_claude_models() {
+    // Check cache first (valid for 24 hours)
+    $cached_models = get_transient('custom_ai_claude_vision_models');
+    if ($cached_models !== false) {
+        return $cached_models;
+    }
+
+    // Get API key for authentication
+    $api_key = get_option('custom_ai_image_description_claude_api_key');
+    if (empty($api_key)) {
+        // Return fallback models if no API key is available
+        return custom_ai_image_description_get_fallback_claude_models();
+    }
+
+    // Fetch from Anthropic API
+    $response = wp_remote_get('https://api.anthropic.com/v1/models', array(
+        'timeout' => 30,
+        'headers' => array(
+            'x-api-key' => $api_key,
+            'anthropic-version' => '2023-06-01'
+        )
+    ));
+
+    if (is_wp_error($response)) {
+        // Return fallback models if API fails
+        return custom_ai_image_description_get_fallback_claude_models();
+    }
+
+    $body = wp_remote_retrieve_body($response);
+    $data = json_decode($body, true);
+
+    if (!isset($data['data']) || !is_array($data['data'])) {
+        return custom_ai_image_description_get_fallback_claude_models();
+    }
+
+    $vision_models = array();
+
+    foreach ($data['data'] as $model) {
+        $model_id = $model['id'];
+
+        // All Claude 3+ and 4.x models support vision
+        // Skip instant models as they're deprecated
+        if (strpos($model_id, 'claude-') === 0) {
+
+            // Skip deprecated/instant models
+            if (strpos($model_id, 'instant') !== false) {
+                continue;
+            }
+
+            // Create display name from model info
+            $display_name = isset($model['display_name']) ? $model['display_name'] : $model_id;
+
+            // Add descriptive labels for known model types with pricing (input/output per MTok)
+            if (strpos($model_id, 'opus-4-5') !== false) {
+                $display_name .= ' (Most Intelligent - $5/$25)';
+            } elseif (strpos($model_id, 'sonnet-4-5') !== false) {
+                $display_name .= ' (Recommended - $3/$15)';
+            } elseif (strpos($model_id, 'haiku-4-5') !== false) {
+                $display_name .= ' (Fast & Economical - $1/$5)';
+            } elseif (strpos($model_id, 'opus-4-1') !== false) {
+                $display_name .= ' ($15/$75)';
+            } elseif (strpos($model_id, 'opus-4-') !== false || preg_match('/opus-4-\d{8}$/', $model_id)) {
+                $display_name .= ' ($15/$75)';
+            } elseif (strpos($model_id, 'sonnet-4-') !== false || preg_match('/sonnet-4-\d{8}$/', $model_id)) {
+                $display_name .= ' ($3/$15)';
+            } elseif (strpos($model_id, '3-7-sonnet') !== false) {
+                $display_name .= ' (Deprecated - $3/$15)';
+            } elseif (strpos($model_id, '3-5-haiku') !== false) {
+                $display_name .= ' ($0.80/$4)';
+            } elseif (strpos($model_id, '3-haiku') !== false) {
+                $display_name .= ' (Legacy - $0.25/$1.25)';
+            }
+
+            $vision_models[$model_id] = $display_name;
+        }
+    }
+
+    // Sort models by preference (best value first)
+    uksort($vision_models, function($a, $b) {
+        // Priority order for model families
+        $priority = array(
+            'sonnet-4-5' => 1,   // Recommended - best value
+            'opus-4-5' => 2,     // Most intelligent
+            'haiku-4-5' => 3,    // Fast & economical
+            'opus-4-1' => 4,     // Advanced
+            'sonnet-4-' => 5,    // Good
+            'opus-4-' => 6,      // Premium
+            '3-7-sonnet' => 7,   // Hybrid reasoning
+            '3-5-haiku' => 8,    // Fast
+            '3-haiku' => 9,      // Legacy
+        );
+
+        $a_priority = 100;
+        $b_priority = 100;
+
+        foreach ($priority as $pattern => $p) {
+            if (strpos($a, $pattern) !== false && $a_priority === 100) {
+                $a_priority = $p;
+            }
+            if (strpos($b, $pattern) !== false && $b_priority === 100) {
+                $b_priority = $p;
+            }
+        }
+
+        if ($a_priority !== $b_priority) {
+            return $a_priority - $b_priority;
+        }
+
+        return strcasecmp($a, $b);
+    });
+
+    // Cache for 24 hours if we got models
+    if (count($vision_models) > 0) {
+        set_transient('custom_ai_claude_vision_models', $vision_models, DAY_IN_SECONDS);
+        return $vision_models;
+    }
+
+    // Return fallback if no vision models found
+    return custom_ai_image_description_get_fallback_claude_models();
+}
+
+// Fallback models if Anthropic API is unavailable
+function custom_ai_image_description_get_fallback_claude_models() {
+    return array(
+        'claude-sonnet-4-5-latest' => 'Claude Sonnet 4.5 (Recommended - $3/$15)',
+        'claude-opus-4-5-latest' => 'Claude Opus 4.5 (Most Intelligent - $5/$25)',
+        'claude-haiku-4-5-latest' => 'Claude Haiku 4.5 (Fast & Economical - $1/$5)',
+        'claude-opus-4-1-latest' => 'Claude Opus 4.1 ($15/$75)',
+        'claude-sonnet-4-latest' => 'Claude Sonnet 4 ($3/$15)',
+        'claude-opus-4-latest' => 'Claude Opus 4 ($15/$75)',
+        'claude-3-5-haiku-latest' => 'Claude Haiku 3.5 ($0.80/$4)'
+    );
+}
+
 // Fetch vision-capable models from OpenAI API
 function custom_ai_image_description_fetch_openai_models() {
     // Check cache first (valid for 24 hours)
@@ -248,10 +385,15 @@ function custom_ai_image_description_fetch_openai_models() {
     
     // Known vision-capable model patterns
     $vision_patterns = array(
+        'gpt-5',           // GPT-5 series with vision (2025)
+        'gpt-4.5',         // GPT-4.5 with vision (2025)
+        'gpt-4.1',         // GPT-4.1 series (2025)
         'gpt-4o',
         'gpt-4-turbo',
         'gpt-4-vision',
-        'chatgpt-4o'
+        'chatgpt-4o',
+        'o1',              // o-series reasoning models with vision
+        'o3'               // o3 reasoning models with vision
     );
     
     foreach ($data['data'] as $model) {
@@ -272,12 +414,26 @@ function custom_ai_image_description_fetch_openai_models() {
             $display_name = $model_id;
             
             // Add descriptive labels for known models
-            if (strpos($model_id, 'gpt-4o') !== false) {
+            if (strpos($model_id, 'gpt-5') !== false) {
+                $display_name .= ' (💎 Latest & Most Advanced)';
+            } elseif (strpos($model_id, 'gpt-4.5') !== false) {
+                $display_name .= ' (💎 Advanced Vision)';
+            } elseif (strpos($model_id, 'gpt-4.1') !== false) {
+                if (strpos($model_id, 'nano') !== false) {
+                    $display_name .= ' (💰 Ultra Fast & Cheap)';
+                } elseif (strpos($model_id, 'mini') !== false) {
+                    $display_name .= ' (💰 Fast & Economical)';
+                } else {
+                    $display_name .= ' (Excellent Performance)';
+                }
+            } elseif (strpos($model_id, 'gpt-4o') !== false) {
                 if (strpos($model_id, 'mini') !== false) {
                     $display_name .= ' (Fast & Cost-effective)';
                 } else {
                     $display_name .= ' (Recommended)';
                 }
+            } elseif (strpos($model_id, 'o1') !== false || strpos($model_id, 'o3') !== false) {
+                $display_name .= ' (🧠 Reasoning Model)';
             } elseif (strpos($model_id, 'gpt-4-turbo') !== false) {
                 $display_name .= ' (Vision capable)';
             } elseif (strpos($model_id, 'gpt-4-vision') !== false) {
@@ -288,16 +444,28 @@ function custom_ai_image_description_fetch_openai_models() {
         }
     }
     
-    // Sort models by preference (gpt-4o first, then others)
+    // Sort models by preference (gpt-5 first, then 4.5, 4.1, 4o, others)
     uksort($vision_models, function($a, $b) {
-        // Prioritize gpt-4o models
+        // Prioritize gpt-5 models
+        if (strpos($a, 'gpt-5') !== false && strpos($b, 'gpt-5') === false) return -1;
+        if (strpos($b, 'gpt-5') !== false && strpos($a, 'gpt-5') === false) return 1;
+
+        // Then gpt-4.5
+        if (strpos($a, 'gpt-4.5') !== false && strpos($b, 'gpt-4.5') === false) return -1;
+        if (strpos($b, 'gpt-4.5') !== false && strpos($a, 'gpt-4.5') === false) return 1;
+
+        // Then gpt-4.1
+        if (strpos($a, 'gpt-4.1') !== false && strpos($b, 'gpt-4.1') === false) return -1;
+        if (strpos($b, 'gpt-4.1') !== false && strpos($a, 'gpt-4.1') === false) return 1;
+
+        // Then gpt-4o models
         if (strpos($a, 'gpt-4o') !== false && strpos($b, 'gpt-4o') === false) return -1;
         if (strpos($b, 'gpt-4o') !== false && strpos($a, 'gpt-4o') === false) return 1;
-        
+
         // Then gpt-4-turbo
         if (strpos($a, 'gpt-4-turbo') !== false && strpos($b, 'gpt-4-turbo') === false) return -1;
         if (strpos($b, 'gpt-4-turbo') !== false && strpos($a, 'gpt-4-turbo') === false) return 1;
-        
+
         return strcasecmp($a, $b);
     });
     
@@ -314,6 +482,8 @@ function custom_ai_image_description_fetch_openai_models() {
 // Fallback models if OpenAI API is unavailable
 function custom_ai_image_description_get_fallback_openai_models() {
     return array(
+        'gpt-4.1' => 'GPT-4.1 (💎 Latest - Excellent Performance)',
+        'gpt-4.1-mini' => 'GPT-4.1 Mini (💰 Fast & Economical)',
         'gpt-4o' => 'GPT-4o (Recommended - Latest vision model)',
         'gpt-4o-mini' => 'GPT-4o Mini (Fast & Cost-effective)',
         'gpt-4-turbo' => 'GPT-4 Turbo (Vision capable)',
@@ -322,18 +492,11 @@ function custom_ai_image_description_get_fallback_openai_models() {
 }
 
 function custom_ai_image_description_model_callback() {
-    $model = get_option('custom_ai_image_description_model', 'claude-3-5-sonnet-latest');
+    $model = get_option('custom_ai_image_description_model', 'claude-sonnet-4-5-latest');
     $provider = get_option('custom_ai_image_description_api_provider', 'claude');
     
-    // Claude models (for direct API)
-    $claude_models = array(
-        'claude-3-5-sonnet-latest' => 'Claude 3.5 Sonnet (Recommended - Auto-updates)',
-        'claude-3-5-haiku-latest' => 'Claude 3.5 Haiku (Fast & Economical - Auto-updates)',
-        'claude-3-7-sonnet-latest' => 'Claude 3.7 Sonnet (Latest - Auto-updates)',
-        'claude-sonnet-4-0' => 'Claude Sonnet 4 (Auto-updates)',
-        'claude-opus-4-0' => 'Claude Opus 4 (Auto-updates)',
-        'claude-opus-4-1' => 'Claude Opus 4.1 (Most Powerful - Auto-updates)'
-    );
+    // Get Claude models dynamically (with caching)
+    $claude_models = custom_ai_image_description_fetch_claude_models();
     
     // Get OpenAI models dynamically (with caching)
     $openai_models = custom_ai_image_description_fetch_openai_models();
@@ -373,6 +536,9 @@ function custom_ai_image_description_model_callback() {
     } elseif ($provider === 'openai') {
         echo ' <button type="button" id="refresh_openai_models" class="button button-secondary" style="margin-left: 10px;">🔄 Refresh Models</button>';
         echo '<span id="refresh_status" style="margin-left: 10px; display: none;"></span>';
+    } elseif ($provider === 'claude') {
+        echo ' <button type="button" id="refresh_claude_models" class="button button-secondary" style="margin-left: 10px;">🔄 Refresh Models</button>';
+        echo '<span id="refresh_status" style="margin-left: 10px; display: none;"></span>';
     }
     
     echo '<p class="description">Select the AI model to use for generating alt text. Models vary in capability, speed, and cost.</p>';
@@ -403,12 +569,19 @@ function custom_ai_image_description_model_callback() {
             if (provider === 'openrouter') {
                 $('#refresh_openrouter_models').show();
                 $('#refresh_openai_models').hide();
+                $('#refresh_claude_models').hide();
             } else if (provider === 'openai') {
                 $('#refresh_openai_models').show();
                 $('#refresh_openrouter_models').hide();
+                $('#refresh_claude_models').hide();
+            } else if (provider === 'claude') {
+                $('#refresh_claude_models').show();
+                $('#refresh_openrouter_models').hide();
+                $('#refresh_openai_models').hide();
             } else {
                 $('#refresh_openrouter_models').hide();
                 $('#refresh_openai_models').hide();
+                $('#refresh_claude_models').hide();
             }
             
             // Select first available model for the provider if current selection is incompatible
@@ -486,7 +659,41 @@ function custom_ai_image_description_model_callback() {
                 }
             });
         });
-        
+
+        // Refresh Claude models
+        $('#refresh_claude_models').on('click', function(e) {
+            e.preventDefault();
+            var $button = $(this);
+            var $status = $('#refresh_status');
+
+            $button.prop('disabled', true);
+            $status.show().html('Fetching models...');
+
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'caidg_refresh_claude_models',
+                    nonce: '<?php echo wp_create_nonce('caidg_refresh_models'); ?>'
+                },
+                success: function(response) {
+                    if (response.success) {
+                        $status.html('✅ Models updated! Found ' + response.data.count + ' models. Refreshing page...');
+                        setTimeout(function() {
+                            location.reload();
+                        }, 1500);
+                    } else {
+                        $status.html('❌ Error: ' + response.data);
+                        $button.prop('disabled', false);
+                    }
+                },
+                error: function() {
+                    $status.html('❌ Network error. Please try again.');
+                    $button.prop('disabled', false);
+                }
+            });
+        });
+
         // Trigger change on page load to ensure correct visibility
         $('#api_provider_select').trigger('change');
     });
@@ -531,7 +738,7 @@ function custom_ai_image_description_generate($image_url, $image_title = '') {
 // Generate alt text using Claude API
 function custom_ai_image_description_generate_claude($image_url, $image_title = '') {
     $api_key = get_option('custom_ai_image_description_claude_api_key');
-    $model = get_option('custom_ai_image_description_model', 'claude-3-5-sonnet-latest');
+    $model = get_option('custom_ai_image_description_model', 'claude-sonnet-4-5-latest');
     $prompt = get_option('custom_ai_image_description_prompt', 'Generate a brief alt text description for this image:');
     $language = get_option('custom_ai_image_description_language', 'en');
     $max_tokens = intval(get_option('custom_ai_image_description_max_tokens', 200));
@@ -996,6 +1203,7 @@ add_action('admin_notices', 'custom_ai_image_description_bulk_action_admin_notic
 add_action('wp_ajax_caidg_generate_alt_text', 'custom_ai_ajax_generate_alt_text');
 add_action('wp_ajax_caidg_refresh_openrouter_models', 'custom_ai_ajax_refresh_openrouter_models');
 add_action('wp_ajax_caidg_refresh_openai_models', 'custom_ai_ajax_refresh_openai_models');
+add_action('wp_ajax_caidg_refresh_claude_models', 'custom_ai_ajax_refresh_claude_models');
 
 // AJAX handler for refreshing OpenRouter models
 function custom_ai_ajax_refresh_openrouter_models() {
@@ -1054,6 +1262,36 @@ function custom_ai_ajax_refresh_openai_models() {
         ));
     } else {
         wp_send_json_error('Failed to fetch models from OpenAI API');
+    }
+}
+
+// AJAX handler for refreshing Claude models
+function custom_ai_ajax_refresh_claude_models() {
+    // Verify nonce
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'caidg_refresh_models')) {
+        wp_send_json_error('Security check failed');
+        return;
+    }
+
+    // Check permissions
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Insufficient permissions');
+        return;
+    }
+
+    // Clear the cache
+    delete_transient('custom_ai_claude_vision_models');
+
+    // Fetch fresh models
+    $models = custom_ai_image_description_fetch_claude_models();
+
+    if ($models && count($models) > 0) {
+        wp_send_json_success(array(
+            'count' => count($models),
+            'models' => $models
+        ));
+    } else {
+        wp_send_json_error('Failed to fetch models from Anthropic API');
     }
 }
 
