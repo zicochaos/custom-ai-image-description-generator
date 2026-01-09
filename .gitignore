@@ -27,6 +27,12 @@ Thumbs.db
 *.sublime-project
 *.sublime-workspace
 
+# Devbox (local development environment)
+.devbox/
+devbox.d/
+devbox.json
+devbox.lock
+
 # Dependencies
 node_modules/
 vendor/

@@ -1804,11 +1804,8 @@ function custom_ai_enqueue_scripts($hook) {
                         }
                     });
                 }
-
-                return false;
             }
         });
-    });
     ");
     
     // Add inline CSS
