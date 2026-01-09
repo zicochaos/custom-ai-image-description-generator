@@ -5,6 +5,37 @@ All notable changes to the Custom AI Image Description Generator plugin will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-01-09
+
+### Added
+
+- **Image Compression Option**
+  - New setting to compress images before sending to API
+  - Resizes images >1024px to reduce token costs
+  - Uses WordPress image editor for quality resizing
+  - Optional - can be enabled/disabled in settings
+
+- **Cost Estimation UI**
+  - Shows estimated cost before bulk operations
+  - Confirmation dialog: "Processing X images with [model]. Estimated cost: $Y"
+  - Pricing data for all Claude, OpenAI, and OpenRouter models
+  - Helps users make informed decisions about API costs
+
+- **Skip Existing Alt Text Option**
+  - New setting to skip images that already have alt text (default: ON)
+  - Avoids regenerating and overwriting existing descriptions
+  - Progress shows: "Processed X, Skipped Y, Errors Z"
+  - Significant cost savings for bulk operations on existing libraries
+
+### Technical
+
+- Added `custom_ai_image_description_maybe_compress_image()` function
+- Added `custom_ai_image_description_get_model_pricing()` function
+- Added `custom_ai_image_description_estimate_cost()` function
+- Added `custom_ai_ajax_estimate_cost()` AJAX handler
+- Added `custom_ai_ajax_check_alt_text()` AJAX handler
+- Enhanced bulk action JavaScript with cost confirmation dialog
+
 ## [2.6.0] - 2026-01-08
 
 ### Added

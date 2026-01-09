@@ -2,7 +2,7 @@
 /*
 Plugin Name: Custom AI Image Description Generator
 Description: Automatically generates alt text for images using Claude API, OpenAI API, or OpenRouter (90+ vision models with automatic discovery)
-Version: 2.6
+Version: 2.7
 Author: Your Name
 */
 
@@ -44,6 +44,8 @@ function custom_ai_image_description_register_settings() {
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_language');
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_max_tokens');
     register_setting('custom_ai_image_description_options', 'custom_ai_image_description_debug_mode');
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_compress_images');
+    register_setting('custom_ai_image_description_options', 'custom_ai_image_description_skip_existing');
 
     add_settings_section('custom_ai_image_description_settings', 'API Settings', 'custom_ai_image_description_settings_section_callback', 'custom_ai_image_description_options');
     
@@ -56,6 +58,8 @@ function custom_ai_image_description_register_settings() {
     add_settings_field('custom_ai_image_description_language', 'Language', 'custom_ai_image_description_language_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
     add_settings_field('custom_ai_image_description_max_tokens', 'Max Tokens', 'custom_ai_image_description_max_tokens_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
     add_settings_field('custom_ai_image_description_debug_mode', 'Debug Mode', 'custom_ai_image_description_debug_mode_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
+    add_settings_field('custom_ai_image_description_compress_images', 'Image Compression', 'custom_ai_image_description_compress_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
+    add_settings_field('custom_ai_image_description_skip_existing', 'Skip Existing Alt Text', 'custom_ai_image_description_skip_existing_callback', 'custom_ai_image_description_options', 'custom_ai_image_description_settings');
 }
 add_action('admin_init', 'custom_ai_image_description_register_settings');
 
@@ -701,6 +705,74 @@ function custom_ai_image_description_model_callback() {
     <?php
 }
 
+// Get model pricing information
+function custom_ai_image_description_get_model_pricing($model) {
+    // Claude models pricing (per million tokens: input/output)
+    $claude_pricing = array(
+        'claude-sonnet-4-5' => array(3, 15),
+        'claude-opus-4-5' => array(5, 25),
+        'claude-haiku-4-5' => array(1, 5),
+        'claude-opus-4-1' => array(15, 75),
+        'claude-opus-4' => array(15, 75),
+        'claude-sonnet-4' => array(3, 15),
+        'claude-3-7-sonnet' => array(3, 15),
+        'claude-3-5-haiku' => array(0.8, 4),
+        'claude-3-haiku' => array(0.25, 1.25),
+    );
+
+    // OpenAI models pricing (per million tokens: input/output)
+    $openai_pricing = array(
+        'gpt-4o' => array(2.5, 10),
+        'gpt-4o-mini' => array(0.15, 0.6),
+        'gpt-4-turbo' => array(10, 30),
+        'gpt-4.1' => array(2, 8),
+        'gpt-4.1-mini' => array(0.15, 0.6),
+        'gpt-4.1-nano' => array(0.07, 0.28),
+        'gpt-4.5' => array(2.5, 10),
+        'o1' => array(15, 60),
+        'o3' => array(15, 60),
+    );
+
+    // Check if it's a Claude model
+    if (strpos($model, 'claude-') === 0) {
+        foreach ($claude_pricing as $model_pattern => $pricing) {
+            if (strpos($model, $model_pattern) !== false) {
+                return $pricing;
+            }
+        }
+    }
+
+    // Check if it's an OpenAI model
+    foreach ($openai_pricing as $model_pattern => $pricing) {
+        if (strpos($model, $model_pattern) !== false) {
+            return $pricing;
+        }
+    }
+
+    // Default fallback pricing (moderate cost assumption)
+    return array(3, 15);
+}
+
+// Estimate cost for bulk operations
+function custom_ai_image_description_estimate_cost($image_count, $model) {
+    $pricing = custom_ai_image_description_get_model_pricing($model);
+
+    // Estimate: ~1000 input tokens per image (image data + prompt)
+    // Estimate: ~100 output tokens per image (alt text)
+    $input_tokens_per_image = 1000;
+    $output_tokens_per_image = 100;
+
+    $total_input_tokens = $image_count * $input_tokens_per_image;
+    $total_output_tokens = $image_count * $output_tokens_per_image;
+
+    // Calculate cost (pricing is per million tokens)
+    $input_cost = ($total_input_tokens / 1000000) * $pricing[0];
+    $output_cost = ($total_output_tokens / 1000000) * $pricing[1];
+    $total_cost = $input_cost + $output_cost;
+
+    return '$' . number_format($total_cost, 2);
+}
+
 function custom_ai_image_description_prompt_callback() {
     $prompt = get_option('custom_ai_image_description_prompt', 'Generate a brief alt text description for this image:');
     echo '<textarea name="custom_ai_image_description_prompt" rows="3" cols="50">' . esc_textarea($prompt) . '</textarea>';
@@ -720,6 +792,85 @@ function custom_ai_image_description_debug_mode_callback() {
     $debug_mode = get_option('custom_ai_image_description_debug_mode', false);
     echo '<input type="checkbox" name="custom_ai_image_description_debug_mode" value="1" ' . checked(1, $debug_mode, false) . '>';
     echo '<label for="custom_ai_image_description_debug_mode">Enable debug mode (logs API responses)</label>';
+}
+
+function custom_ai_image_description_compress_callback() {
+    $compress = get_option('custom_ai_image_description_compress_images', false);
+    echo '<input type="checkbox" name="custom_ai_image_description_compress_images" value="1" ' . checked(1, $compress, false) . '>';
+    echo '<label for="custom_ai_image_description_compress_images">Compress images before sending to API (reduces costs, recommended for images >1024px)</label>';
+}
+
+function custom_ai_image_description_skip_existing_callback() {
+    $skip_existing = get_option('custom_ai_image_description_skip_existing', true);
+    echo '<input type="checkbox" name="custom_ai_image_description_skip_existing" value="1" ' . checked(1, $skip_existing, false) . '>';
+    echo '<label for="custom_ai_image_description_skip_existing">Skip images that already have alt text (recommended for bulk operations)</label>';
+}
+
+// Helper function to compress images if enabled
+function custom_ai_image_description_maybe_compress_image($image_data, $mime_type) {
+    $compress_enabled = get_option('custom_ai_image_description_compress_images', false);
+
+    if (!$compress_enabled) {
+        return $image_data;
+    }
+
+    $image_info = getimagesizefromstring($image_data);
+    if ($image_info === false) {
+        return $image_data;
+    }
+
+    $width = $image_info[0];
+    $height = $image_info[1];
+
+    // Only compress if dimensions exceed 1024px on either side
+    if ($width <= 1024 && $height <= 1024) {
+        return $image_data;
+    }
+
+    // Save to temp file
+    $temp_file = wp_tempnam();
+    file_put_contents($temp_file, $image_data);
+
+    // Use WordPress image editor to resize
+    $editor = wp_get_image_editor($temp_file);
+
+    if (is_wp_error($editor)) {
+        unlink($temp_file);
+        return $image_data;
+    }
+
+    // Calculate new dimensions maintaining aspect ratio
+    $max_size = 1024;
+    if ($width > $height) {
+        $new_width = $max_size;
+        $new_height = intval($height * ($max_size / $width));
+    } else {
+        $new_height = $max_size;
+        $new_width = intval($width * ($max_size / $height));
+    }
+
+    $editor->resize($new_width, $new_height, false);
+
+    // Generate the compressed image
+    $compressed_image = $editor->get_image();
+
+    if (is_wp_error($compressed_image)) {
+        unlink($temp_file);
+        return $image_data;
+    }
+
+    // Save the compressed image to temp file
+    $result = $editor->save($temp_file);
+
+    // Clean up temp file and return compressed data
+    if (!is_wp_error($result)) {
+        $compressed_data = file_get_contents($temp_file);
+        unlink($temp_file);
+        return $compressed_data !== false ? $compressed_data : $image_data;
+    }
+
+    unlink($temp_file);
+    return $image_data;
 }
 
 // Generate alt text using selected API provider
@@ -755,15 +906,19 @@ function custom_ai_image_description_generate_claude($image_url, $image_title = 
         error_log("Custom AI Image Description Generator Error: Failed to fetch image content from URL: $image_url");
         return new WP_Error('image_fetch_error', 'Failed to fetch image content');
     }
-    
+
     // Detect actual image type
     $image_info = getimagesizefromstring($image_content);
     if ($image_info === false) {
         error_log("Custom AI Image Description Generator Error: Invalid image format for URL: $image_url");
         return new WP_Error('invalid_image', 'Invalid image format');
     }
-    
+
     $mime_type = $image_info['mime'];
+
+    // Apply compression if enabled and image is large
+    $image_content = custom_ai_image_description_maybe_compress_image($image_content, $mime_type);
+
     $base64_image = base64_encode($image_content);
     
     if ($debug_mode) {
@@ -864,15 +1019,19 @@ function custom_ai_image_description_generate_openrouter($image_url, $image_titl
         error_log("Custom AI Image Description Generator Error: Failed to fetch image content from URL: $image_url");
         return new WP_Error('image_fetch_error', 'Failed to fetch image content');
     }
-    
+
     // Detect actual image type
     $image_info = getimagesizefromstring($image_content);
     if ($image_info === false) {
         error_log("Custom AI Image Description Generator Error: Invalid image format for URL: $image_url");
         return new WP_Error('invalid_image', 'Invalid image format');
     }
-    
+
     $mime_type = $image_info['mime'];
+
+    // Apply compression if enabled and image is large
+    $image_content = custom_ai_image_description_maybe_compress_image($image_content, $mime_type);
+
     $base64_image = base64_encode($image_content);
     
     if ($debug_mode) {
@@ -988,15 +1147,19 @@ function custom_ai_image_description_generate_openai($image_url, $image_title = 
         error_log("Custom AI Image Description Generator Error: Failed to fetch image content from URL: $image_url");
         return new WP_Error('image_fetch_error', 'Failed to fetch image content');
     }
-    
+
     // Detect actual image type
     $image_info = getimagesizefromstring($image_content);
     if ($image_info === false) {
         error_log("Custom AI Image Description Generator Error: Invalid image format for URL: $image_url");
         return new WP_Error('invalid_image', 'Invalid image format');
     }
-    
+
     $mime_type = $image_info['mime'];
+
+    // Apply compression if enabled and image is large
+    $image_content = custom_ai_image_description_maybe_compress_image($image_content, $mime_type);
+
     $base64_image = base64_encode($image_content);
     
     if ($debug_mode) {
@@ -1204,6 +1367,8 @@ add_action('wp_ajax_caidg_generate_alt_text', 'custom_ai_ajax_generate_alt_text'
 add_action('wp_ajax_caidg_refresh_openrouter_models', 'custom_ai_ajax_refresh_openrouter_models');
 add_action('wp_ajax_caidg_refresh_openai_models', 'custom_ai_ajax_refresh_openai_models');
 add_action('wp_ajax_caidg_refresh_claude_models', 'custom_ai_ajax_refresh_claude_models');
+add_action('wp_ajax_caidg_estimate_cost', 'custom_ai_ajax_estimate_cost');
+add_action('wp_ajax_caidg_check_alt_text', 'custom_ai_ajax_check_alt_text');
 
 // AJAX handler for refreshing OpenRouter models
 function custom_ai_ajax_refresh_openrouter_models() {
@@ -1301,38 +1466,98 @@ function custom_ai_ajax_generate_alt_text() {
         wp_send_json_error('Security check failed');
         return;
     }
-    
+
     // Check permissions
     if (!current_user_can('upload_files')) {
         wp_send_json_error('Insufficient permissions');
         return;
     }
-    
+
     $attachment_id = intval($_POST['attachment_id']);
     if (!$attachment_id) {
         wp_send_json_error('Invalid attachment ID');
         return;
     }
-    
+
     $image_url = wp_get_attachment_url($attachment_id);
     if (!$image_url) {
         wp_send_json_error('Could not retrieve image URL');
         return;
     }
-    
+
     $image_title = get_the_title($attachment_id);
     $alt_text = custom_ai_image_description_generate_with_retry($image_url, $image_title);
-    
+
     if (is_wp_error($alt_text)) {
         wp_send_json_error($alt_text->get_error_message());
         return;
     }
-    
+
     update_post_meta($attachment_id, '_wp_attachment_image_alt', $alt_text);
-    
+
     wp_send_json_success([
         'alt_text' => $alt_text,
         'attachment_id' => $attachment_id
+    ]);
+}
+
+// AJAX handler for cost estimation
+function custom_ai_ajax_estimate_cost() {
+    // Verify nonce
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'caidg_ajax_nonce')) {
+        wp_send_json_error('Security check failed');
+        return;
+    }
+
+    // Check permissions
+    if (!current_user_can('upload_files')) {
+        wp_send_json_error('Insufficient permissions');
+        return;
+    }
+
+    $image_count = intval($_POST['image_count']);
+    if (!$image_count || $image_count < 1) {
+        wp_send_json_error('Invalid image count');
+        return;
+    }
+
+    $model = get_option('custom_ai_image_description_model', 'claude-sonnet-4-5-latest');
+    $estimated_cost = custom_ai_image_description_estimate_cost($image_count, $model);
+
+    wp_send_json_success([
+        'image_count' => $image_count,
+        'model' => $model,
+        'estimated_cost' => $estimated_cost
+    ]);
+}
+
+// AJAX handler for checking existing alt text
+function custom_ai_ajax_check_alt_text() {
+    // Verify nonce
+    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'caidg_ajax_nonce')) {
+        wp_send_json_error('Security check failed');
+        return;
+    }
+
+    // Check permissions
+    if (!current_user_can('upload_files')) {
+        wp_send_json_error('Insufficient permissions');
+        return;
+    }
+
+    $attachment_id = intval($_POST['attachment_id']);
+    if (!$attachment_id) {
+        wp_send_json_error('Invalid attachment ID');
+        return;
+    }
+
+    $alt_text = get_post_meta($attachment_id, '_wp_attachment_image_alt', true);
+    $has_alt_text = !empty($alt_text);
+
+    wp_send_json_success([
+        'attachment_id' => $attachment_id,
+        'has_alt_text' => $has_alt_text,
+        'alt_text' => $has_alt_text ? $alt_text : ''
     ]);
 }
 
@@ -1349,24 +1574,25 @@ function custom_ai_enqueue_scripts($hook) {
         window.caidg_ajax = {
             ajax_url: '" . admin_url('admin-ajax.php') . "',
             nonce: '" . wp_create_nonce('caidg_ajax_nonce') . "',
+            skip_existing: " . (get_option('custom_ai_image_description_skip_existing', true) ? 'true' : 'false') . ",
             generating: 'Generating...',
             error: 'Error:',
             complete: 'Complete!'
         };
-        
+
         // Handle bulk action with progress
         $('#doaction, #doaction2').on('click', function(e) {
             var action = $(this).prev('select').val();
-            
+
             if (action === 'generate_custom_ai_description') {
                 e.preventDefault();
-                
+
                 var checkedBoxes = $('#the-list input[type=\"checkbox\"]:checked');
                 if (checkedBoxes.length === 0) {
                     alert('Please select at least one image');
                     return false;
                 }
-                
+
                 var attachmentIds = [];
                 checkedBoxes.each(function() {
                     var id = $(this).val();
@@ -1374,44 +1600,153 @@ function custom_ai_enqueue_scripts($hook) {
                         attachmentIds.push(id);
                     }
                 });
-                
+
                 if (attachmentIds.length === 0) {
                     alert('No valid images selected');
                     return false;
                 }
-                
-                // Create progress container
-                var progressHtml = '<div id=\"caidg-progress\" style=\"margin: 20px 0; padding: 20px; background: #fff; border: 1px solid #c3c4c7; box-shadow: 0 1px 1px rgba(0,0,0,.04);\">' +
-                    '<h3>Generating Alt Text</h3>' +
-                    '<div style=\"margin: 10px 0;\">Processing <span id=\"caidg-current\">1</span> of <span id=\"caidg-total\">' + attachmentIds.length + '</span> images...</div>' +
-                    '<div style=\"background: #f0f0f1; height: 24px; border-radius: 3px; overflow: hidden;\">' +
-                    '<div id=\"caidg-progress-bar\" style=\"background: #2271b1; height: 100%; width: 0%; transition: width 0.3s; border-radius: 3px;\"></div>' +
-                    '</div>' +
-                    '<div id=\"caidg-status\" style=\"margin-top: 10px; color: #50575e;\"></div>' +
-                    '</div>';
-                
-                $('.tablenav.top').after(progressHtml);
-                
-                // Process images sequentially
-                processImages(attachmentIds, 0);
-                
-                function processImages(ids, index) {
+
+                // Fetch cost estimate before proceeding
+                $.ajax({
+                    url: caidg_ajax.ajax_url,
+                    type: 'POST',
+                    data: {
+                        action: 'caidg_estimate_cost',
+                        image_count: attachmentIds.length,
+                        nonce: caidg_ajax.nonce
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            var confirmed = confirm(
+                                'Processing ' + attachmentIds.length + ' images with model: ' + response.data.model + '.\\n\\n' +
+                                'Estimated cost: ' + response.data.estimated_cost + '\\n\\n' +
+                                'Continue?'
+                            );
+
+                            if (confirmed) {
+                                startBulkProcessing(attachmentIds);
+                            }
+                        } else {
+                            alert('Could not estimate cost: ' + response.data);
+                            if (confirm('Proceed anyway?')) {
+                                startBulkProcessing(attachmentIds);
+                            }
+                        }
+                    },
+                    error: function() {
+                        // If AJAX fails, ask user if they want to proceed without estimate
+                        if (confirm('Could not fetch cost estimate. Proceed with processing ' + attachmentIds.length + ' images?')) {
+                            startBulkProcessing(attachmentIds);
+                        }
+                    }
+                });
+
+                return false;
+            }
+        });
+
+        function startBulkProcessing(attachmentIds) {
+            // Create progress container
+            var progressHtml = '<div id=\"caidg-progress\" style=\"margin: 20px 0; padding: 20px; background: #fff; border: 1px solid #c3c4c7; box-shadow: 0 1px 1px rgba(0,0,0,.04);\">' +
+                '<h3>Generating Alt Text</h3>' +
+                '<div style=\"margin: 10px 0;\">Processing <span id=\"caidg-current\">1</span> of <span id=\"caidg-total\">' + attachmentIds.length + '</span> images...</div>' +
+                '<div style=\"background: #f0f0f1; height: 24px; border-radius: 3px; overflow: hidden;\">' +
+                '<div id=\"caidg-progress-bar\" style=\"background: #2271b1; height: 100%; width: 0%; transition: width 0.3s; border-radius: 3px;\"></div>' +
+                '</div>' +
+                '<div id=\"caidg-status\" style=\"margin-top: 10px; color: #50575e;\"></div>' +
+                '<div id=\"caidg-summary\" style=\"margin-top: 10px; font-size: 0.9em;\"></div>' +
+                '</div>';
+
+            $('.tablenav.top').after(progressHtml);
+
+            // Initialize counters
+            var processed = 0;
+            var skipped = 0;
+            var errors = 0;
+
+            // Process images sequentially
+            processImages(attachmentIds, 0, processed, skipped, errors);
+
+                function processImages(ids, index, processed, skipped, errors) {
                     if (index >= ids.length) {
-                        $('#caidg-status').html('<strong style=\"color: #00a32a;\">✓ All images processed successfully!</strong>');
+                        // All images processed
+                        var summaryText = '<strong>Results:</strong> ';
+                        summaryText += '<span style=\"color: #00a32a;\">' + processed + ' processed</span>';
+                        if (skipped > 0) {
+                            summaryText += ', <span style=\"color: #646970;\">' + skipped + ' skipped</span>';
+                        }
+                        if (errors > 0) {
+                            summaryText += ', <span style=\"color: #d63638;\">' + errors + ' errors</span>';
+                        }
+
+                        $('#caidg-status').html('<strong style=\"color: #00a32a;\">✓ Processing complete!</strong>');
+                        $('#caidg-summary').html(summaryText);
+
                         setTimeout(function() {
                             $('#caidg-progress').fadeOut(function() {
                                 $(this).remove();
                                 location.reload(); // Reload to show updated alt text
                             });
-                        }, 2000);
+                        }, 3000);
                         return;
                     }
-                    
+
                     var progress = ((index + 1) / ids.length) * 100;
                     $('#caidg-current').text(index + 1);
                     $('#caidg-progress-bar').css('width', progress + '%');
+                    $('#caidg-status').text('Processing image #' + ids[index] + '...');
+
+                    // Check if we should skip images with existing alt text
+                    if (caidg_ajax.skip_existing) {
+                        $.ajax({
+                            url: caidg_ajax.ajax_url,
+                            type: 'POST',
+                            data: {
+                                action: 'caidg_check_alt_text',
+                                attachment_id: ids[index],
+                                nonce: caidg_ajax.nonce
+                            },
+                            success: function(checkResponse) {
+                                if (checkResponse.success && checkResponse.data.has_alt_text) {
+                                    // Skip this image
+                                    skipped++;
+                                    console.log('Skipping image #' + ids[index] + ' (already has alt text)');
+                                    $('#caidg-status').text('Skipped image #' + ids[index] + ' (already has alt text)');
+
+                                    // Update summary
+                                    var summaryText = '<strong>Progress:</strong> ';
+                                    summaryText += '<span style=\"color: #00a32a;\">' + processed + ' processed</span>';
+                                    if (skipped > 0) {
+                                        summaryText += ', <span style=\"color: #646970;\">' + skipped + ' skipped</span>';
+                                    }
+                                    if (errors > 0) {
+                                        summaryText += ', <span style=\"color: #d63638;\">' + errors + ' errors</span>';
+                                    }
+                                    $('#caidg-summary').html(summaryText);
+
+                                    // Continue with next image
+                                    setTimeout(function() {
+                                        processImages(ids, index + 1, processed, skipped, errors);
+                                    }, 100);
+                                } else {
+                                    // Generate alt text for this image
+                                    generateAltText(ids, index, processed, skipped, errors);
+                                }
+                            },
+                            error: function() {
+                                // If check fails, proceed with generation
+                                generateAltText(ids, index, processed, skipped, errors);
+                            }
+                        });
+                    } else {
+                        // Skip check disabled, generate directly
+                        generateAltText(ids, index, processed, skipped, errors);
+                    }
+                }
+
+                function generateAltText(ids, index, processed, skipped, errors) {
                     $('#caidg-status').text('Generating alt text for image #' + ids[index] + '...');
-                    
+
                     $.ajax({
                         url: caidg_ajax.ajax_url,
                         type: 'POST',
@@ -1422,27 +1757,54 @@ function custom_ai_enqueue_scripts($hook) {
                         },
                         success: function(response) {
                             if (response.success) {
+                                processed++;
                                 console.log('Generated alt text for #' + ids[index]);
                             } else {
+                                errors++;
                                 console.error('Error for #' + ids[index] + ': ' + response.data);
                                 $('#caidg-status').append('<div style=\"color: #d63638;\">Error for image #' + ids[index] + ': ' + response.data + '</div>');
                             }
+
+                            // Update summary
+                            var summaryText = '<strong>Progress:</strong> ';
+                            summaryText += '<span style=\"color: #00a32a;\">' + processed + ' processed</span>';
+                            if (skipped > 0) {
+                                summaryText += ', <span style=\"color: #646970;\">' + skipped + ' skipped</span>';
+                            }
+                            if (errors > 0) {
+                                summaryText += ', <span style=\"color: #d63638;\">' + errors + ' errors</span>';
+                            }
+                            $('#caidg-summary').html(summaryText);
+
                             // Continue with next image
                             setTimeout(function() {
-                                processImages(ids, index + 1);
+                                processImages(ids, index + 1, processed, skipped, errors);
                             }, 500); // Small delay between requests
                         },
                         error: function(xhr, status, error) {
+                            errors++;
                             console.error('Network error for #' + ids[index]);
                             $('#caidg-status').append('<div style=\"color: #d63638;\">Network error for image #' + ids[index] + '</div>');
+
+                            // Update summary
+                            var summaryText = '<strong>Progress:</strong> ';
+                            summaryText += '<span style=\"color: #00a32a;\">' + processed + ' processed</span>';
+                            if (skipped > 0) {
+                                summaryText += ', <span style=\"color: #646970;\">' + skipped + ' skipped</span>';
+                            }
+                            if (errors > 0) {
+                                summaryText += ', <span style=\"color: #d63638;\">' + errors + ' errors</span>';
+                            }
+                            $('#caidg-summary').html(summaryText);
+
                             // Continue despite error
                             setTimeout(function() {
-                                processImages(ids, index + 1);
+                                processImages(ids, index + 1, processed, skipped, errors);
                             }, 500);
                         }
                     });
                 }
-                
+
                 return false;
             }
         });
