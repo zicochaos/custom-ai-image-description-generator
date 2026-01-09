@@ -1,6 +1,7 @@
 # Claude-specific files
 CLAUDE.md
 .claude/
+.kiro/
 
 # WordPress
 *.log
