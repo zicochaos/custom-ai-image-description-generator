@@ -5,6 +5,39 @@ All notable changes to the Custom AI Image Description Generator plugin will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-04-07
+
+### Added
+
+- **Custom OpenAI-Compatible Provider**
+  - New "Custom (OpenAI-compatible)" provider option in settings
+  - Connect to any OpenAI-compatible API endpoint
+  - Supports Ollama, LM Studio, vLLM, Groq, Together AI, Fireworks, and more
+  - Optional API key (leave empty for local/unauthenticated endpoints like Ollama)
+  - Free-text model name input (type any model name your endpoint supports)
+  - 120-second timeout for slower local/self-hosted models
+  - Automatic `/chat/completions` path resolution from base URL
+
+### New Settings
+
+- `custom_ai_image_description_custom_base_url` - Base URL of the OpenAI-compatible endpoint
+- `custom_ai_image_description_custom_api_key` - API key (optional, for authenticated endpoints)
+
+### Changed
+
+- Version bumped from 2.7 to 2.8
+- Plugin description updated to mention custom endpoint support
+- Model selector switches to free-text input when Custom provider is selected
+- JavaScript provider toggle handles dropdown/text-input switching
+
+### Technical
+
+- Added `custom_ai_image_description_generate_custom()` function
+- Added `custom_ai_image_description_custom_api_key_callback()` settings callback
+- Added `custom_ai_image_description_custom_base_url_callback()` settings callback
+- Updated `custom_ai_image_description_generate()` router for `custom` provider
+- Enhanced admin JavaScript for four-provider switching with disabled state management
+
 ## [2.7.0] - 2026-01-09
 
 ### Added
@@ -313,14 +346,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### [2.7.0]
 
-- [ ] Caching system for generated descriptions
-- [ ] Rate limiting controls
+- [x] Image compression option
+- [x] Cost estimation UI
+- [x] Skip existing alt text option
 
 ### [2.8.0]
 
-- [ ] Export/Import alt text functionality
-- [ ] Batch scheduling for large libraries
-- [ ] Custom taxonomies for images
+- [x] Custom OpenAI-compatible provider (Ollama, LM Studio, Groq, etc.)
+
+### [2.9.0]
+
+- [ ] Caching system for generated descriptions
+- [ ] Rate limiting controls
 
 ### [3.0.0]
 

@@ -1,10 +1,10 @@
 # Custom AI Image Description Generator
 
-A powerful WordPress plugin that automatically generates accessible alt text for images using multiple AI providers: Claude API, OpenAI API, and OpenRouter.
+A powerful WordPress plugin that automatically generates accessible alt text for images using multiple AI providers: Claude API, OpenAI API, OpenRouter, or any OpenAI-compatible endpoint (Ollama, LM Studio, vLLM, Groq, Together AI, etc.).
 
 ![WordPress Version](https://img.shields.io/badge/WordPress-5.0%2B-blue)
 ![PHP Version](https://img.shields.io/badge/PHP-7.4%2B-purple)
-![Plugin Version](https://img.shields.io/badge/Version-2.6-green)
+![Plugin Version](https://img.shields.io/badge/Version-2.8-green)
 ![License](https://img.shields.io/badge/License-GPL%20v2-red)
 
 ## Features
@@ -32,8 +32,9 @@ A powerful WordPress plugin that automatically generates accessible alt text for
 - One or more API keys:
   - Anthropic Claude API key, or
   - OpenAI API key (v2.4+), or
-  - OpenRouter API key (access to 90+ models)
-- Active internet connection
+  - OpenRouter API key (access to 90+ models), or
+  - Custom OpenAI-compatible endpoint (v2.8+)
+- Active internet connection (except for local endpoints like Ollama)
 
 ## Installation
 
@@ -51,9 +52,9 @@ A powerful WordPress plugin that automatically generates accessible alt text for
 
 4. **Configure Settings**
    - Go to Settings > Custom AI Image Description
-   - Select your preferred API provider (Claude, OpenAI, or OpenRouter)
-   - Enter the corresponding API key
-   - Select your preferred model
+   - Select your preferred API provider (Claude, OpenAI, OpenRouter, or Custom)
+   - Enter the corresponding API key (optional for local endpoints like Ollama)
+   - Select your preferred model (or enter model name for Custom provider)
    - Configure other options as needed
 
 ## Configuration
@@ -83,12 +84,31 @@ A powerful WordPress plugin that automatically generates accessible alt text for
 3. Click "Create Key"
 4. Copy the key (starts with `sk-or-`)
 
+#### Custom OpenAI-Compatible Endpoint (v2.8+)
+
+No API key needed for local endpoints (Ollama, LM Studio). For cloud providers:
+
+1. Obtain an API key from your provider (Groq, Together AI, Fireworks, etc.)
+2. Enter the base URL of your endpoint (e.g., `http://localhost:11434/v1` for Ollama)
+3. Enter the model name your endpoint expects (e.g., `llama3.2-vision`)
+
+**Supported endpoints:**
+
+| Endpoint | Base URL | Notes |
+|----------|----------|-------|
+| Ollama | `http://localhost:11434/v1` | No API key required |
+| LM Studio | `http://localhost:1234/v1` | No API key required |
+| Groq | `https://api.groq.com/openai/v1` | API key required |
+| Together AI | `https://api.together.xyz/v1` | API key required |
+| Fireworks | `https://api.fireworks.ai/inference/v1` | API key required |
+| vLLM | Your server URL | Varies |
+
 ### Plugin Settings
 
 | Setting           | Description                          | Default                                                 | Range/Options                                             |
 | ----------------- | ------------------------------------ | ------------------------------------------------------- | --------------------------------------------------------- |
-| **API Provider**  | Choose your AI provider              | claude                                                  | claude / openai / openrouter                              |
-| **API Key**       | Your provider API key                | Required                                                | Claude: `sk-ant-api`, OpenAI: `sk-`, OpenRouter: `sk-or-` |
+| **API Provider**  | Choose your AI provider              | claude                                                  | claude / openai / openrouter / custom                     |
+| **API Key**       | Your provider API key                | Required (except Custom local)                          | Claude: `sk-ant-api`, OpenAI: `sk-`, OpenRouter: `sk-or-`, Custom: optional |
 | **Model**         | AI model to use                      | Provider-dependent                                      | See models table below                                    |
 | **Custom Prompt** | Instructions for alt text generation | "Generate a brief alt text description for this image:" | Any text                                                  |
 | **Language**      | Output language for alt text         | en                                                      | Any language code (en, es, fr, de, it, pt, ja, zh, etc.)  |
@@ -188,6 +208,25 @@ The plugin automatically fetches available models from Anthropic's API. Models a
 - 24-hour caching for optimal performance
 
 > **OpenRouter Benefits:** Access to 90+ vision models from all major providers with one API key, automatic model updates, and pay-per-use pricing.
+
+#### Custom OpenAI-Compatible Endpoint (v2.8+)
+
+Connect to any OpenAI-compatible API endpoint for maximum flexibility.
+
+**Use cases:**
+
+- **Local AI**: Run models privately with Ollama or LM Studio (no API costs)
+- **Alternative providers**: Use Groq for fast inference, Together AI for open-source models
+- **Self-hosted**: Connect to your own vLLM or similar deployment
+
+**Configuration:**
+
+1. Select **Custom (OpenAI-compatible)** as provider
+2. Enter **Base URL** (e.g., `http://localhost:11434/v1`)
+3. Enter **API Key** if required (leave empty for local endpoints)
+4. Type the **model name** your endpoint expects (e.g., `llama3.2-vision`)
+
+> **Note:** The endpoint must support the OpenAI chat completions format with vision/image input (base64). Not all local models support vision -- check your model's capabilities.
 
 ### Configuration Examples
 
@@ -404,10 +443,10 @@ Planned features:
 - [ ] Rate limiting controls
 - [ ] Export/Import alt text
 - [ ] Batch scheduling
-- [ ] WebP and AVIF support
+- [ ] AVIF support
 - [ ] Custom taxonomies for image categorization
 - [ ] Multi-site support
 
 ---
 
-**Note:** This plugin requires an active Anthropic API key and incurs costs based on API usage. Monitor your usage at [console.anthropic.com](https://console.anthropic.com/).
+**Note:** This plugin requires an API key from your chosen provider (except local endpoints like Ollama). Cloud API usage incurs costs based on usage. Monitor your usage at your provider's dashboard.
