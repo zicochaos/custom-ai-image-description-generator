@@ -30,8 +30,6 @@ cp INSTALL.md "$PLUGIN_DIR/"
 
 # Optional: include diagnostic tools (comment out if not wanted)
 [ -f diagnostic.php ] && cp diagnostic.php "$PLUGIN_DIR/"
-[ -f test-generation.php ] && cp test-generation.php "$PLUGIN_DIR/"
-[ -f test-openrouter.php ] && cp test-openrouter.php "$PLUGIN_DIR/"
 
 # Create zip
 cd "$TEMP_DIR"
